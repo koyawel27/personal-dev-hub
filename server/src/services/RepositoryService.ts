@@ -424,9 +424,14 @@ async function enrichGitHub(repoId: number): Promise<void> {
 }
 
 async function refreshRepoRow(repo: RepoRow, isNew: boolean): Promise<void> {
+  // Reverse match FIRST: a fresh clone whose remote identity matches an
+  // already-tracked GitHub-only project must be adopted before its commits
+  // are persisted, so the pristine-project merge condition still holds.
+  reconcileTrackedIdentity(repo.id, repo.canonical_path);
   const inspection = await inspectRepository(repo.local_path);
   const observedAt = nowIso();
   persistInspection(repo, inspection, observedAt, isNew);
+  reconcileTrackedIdentity(repo.id, repo.canonical_path);
   try {
     await enrichGitHub(repo.id);
   } catch {
@@ -456,8 +461,8 @@ function upsertDiscoveredRepo(
   const db = getDb();
 
   // Every binding must belong to a project (004 invariant). A brand-new
-  // local repository starts as its own project; the V1.1 matching engine
-  // (GC milestone) will later link bindings that share GitHub identity.
+  // local repository starts as its own project; reconcileTrackedIdentity()
+  // below may later merge it into an already-tracked GitHub-only project.
   const projectResult = db
     .prepare(
       `INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)`,
@@ -482,6 +487,75 @@ function upsertDiscoveredRepo(
     );
 
   return { repo: getRepoRow(Number(result.lastInsertRowid)), isNew: true };
+}
+
+/**
+ * Reverse match (V1.1): after a binding's remotes are persisted, if one of
+ * them matches an already-tracked GitHub binding's identity, move this
+ * binding into that project — upgrading GITHUB ONLY to LOCAL + GITHUB
+ * without duplicating anything. Only merges when the freshly discovered
+ * project is still empty (single fresh binding, no metadata/history), so
+ * user-curated projects are never silently absorbed.
+ */
+function reconcileTrackedIdentity(repoId: number, canonicalPath: string): void {
+  const db = getDb();
+  const mine = db
+    .prepare(
+      `SELECT lr.project_id AS projectId, r.url
+       FROM local_repositories lr
+       LEFT JOIN git_remotes r ON r.local_repository_id = lr.id
+       WHERE lr.id = ?`,
+    )
+    .all(repoId) as Array<{ projectId: number | null; url: string | null }>;
+  const currentProjectId = mine[0]?.projectId;
+  if (currentProjectId == null) return;
+
+  for (const row of mine) {
+    if (!row.url) continue;
+    const parsed = parseGitHubRemote(row.url);
+    if (!parsed) continue;
+    const tracked = db
+      .prepare(
+        `SELECT id, project_id FROM github_repositories
+         WHERE owner_norm = lower(?) AND name_norm = lower(?) AND project_id IS NOT NULL`,
+      )
+      .get(parsed.owner, parsed.repository) as
+      | { id: number; project_id: number }
+      | undefined;
+    if (!tracked || tracked.project_id === currentProjectId) continue;
+
+    // Merge only a pristine auto-created project: no OTHER bindings and no
+    // user-authored metadata. The fresh binding's own commits/events move
+    // with it — they are this repository's history and belong to the target.
+    const counts = db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM local_repositories WHERE project_id = ? AND id != ?) AS otherLocals,
+           (SELECT include_in_portfolio + COALESCE(project_status IS NOT NULL, 0)
+              + COALESCE(project_type IS NOT NULL, 0) + COALESCE(project_note IS NOT NULL, 0)
+            FROM projects WHERE id = ?) AS meta`,
+      )
+      .get(currentProjectId, repoId, currentProjectId) as {
+      otherLocals: number;
+      meta: number;
+    };
+    if (counts.otherLocals > 0 || counts.meta > 0) {
+      continue;
+    }
+
+    withTransaction(() => {
+      db.prepare("UPDATE local_repositories SET project_id = ? WHERE id = ?").run(
+        tracked.project_id,
+        repoId,
+      );
+      db.prepare("UPDATE activity_events SET project_id = ? WHERE project_id = ?").run(
+        tracked.project_id,
+        currentProjectId,
+      );
+      db.prepare("DELETE FROM projects WHERE id = ?").run(currentProjectId);
+    });
+    return;
+  }
 }
 
 export function listRepositories(): RepositoryListItem[] {

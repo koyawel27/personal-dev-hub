@@ -1,0 +1,715 @@
+import type {
+  GitHubMetadataDto,
+  ProjectStatus,
+  ProjectType,
+  SnapshotDto,
+  SourceState,
+} from "../../../shared/api-types.js";
+import { PROJECT_STATUSES, PROJECT_TYPES } from "../../../shared/api-types.js";
+import { parseGitHubRemote, isSafeSegment } from "../../../shared/github-remote.js";
+import { getDb, nowIso, withTransaction } from "../db/client.js";
+import { AppError, ErrorCodes } from "../lib/errors.js";
+import {
+  persistActivityEventsDirect,
+  type DerivedEvent,
+} from "./ActivityService.js";
+import { fetchGitHubRepoMetadata } from "./GitHubService.js";
+
+/**
+ * Project-centric domain layer (V1.1).
+ *
+ * A Project owns manual metadata and has zero-or-one GitHub binding plus
+ * zero-or-more local bindings. `sourceState` is derived, never stored.
+ */
+
+export type ProjectRow = {
+  id: number;
+  name: string;
+  project_status: ProjectStatus | null;
+  project_type: ProjectType | null;
+  project_note: string | null;
+  include_in_portfolio: number;
+  portfolio_order: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GhBindingRow = {
+  id: number;
+  project_id: number | null;
+  owner: string;
+  name: string;
+  full_name: string;
+  visibility: string | null;
+  default_branch: string | null;
+  html_url: string | null;
+  last_pushed_at: string | null;
+  tracked_at: string | null;
+};
+
+export function getProjectRow(id: number): ProjectRow {
+  const row = getDb()
+    .prepare(
+      `SELECT id, name, project_status, project_type, project_note,
+              include_in_portfolio, portfolio_order, created_at, updated_at
+       FROM projects WHERE id = ?`,
+    )
+    .get(id) as ProjectRow | undefined;
+  if (!row) {
+    throw new AppError(ErrorCodes.REPOSITORY_NOT_FOUND, "Project was not found.", 404);
+  }
+  return row;
+}
+
+export function githubBindingForProject(projectId: number): GhBindingRow | null {
+  return (
+    (getDb()
+      .prepare(
+        `SELECT id, project_id, owner, name, full_name, visibility, default_branch,
+                html_url, last_pushed_at, tracked_at
+         FROM github_repositories
+         WHERE project_id = ?
+         LIMIT 1`,
+      )
+      .get(projectId) as GhBindingRow | undefined) ?? null
+  );
+}
+
+export function localBindingCount(projectId: number): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM local_repositories WHERE project_id = ?")
+      .get(projectId) as { n: number }
+  ).n;
+}
+
+/** Latest meaningful activity time across both event origins. */
+function lastMeaningfulAt(projectId: number): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(occurred_at) AS at FROM activity_events
+       WHERE project_id = ?
+         AND event_type IN ('commit_observed','github_commit_observed',
+                            'working_tree_dirty','working_tree_clean',
+                            'branch_changed','ahead_changed','behind_changed')`,
+    )
+    .get(projectId) as { at: string | null };
+  return row.at ?? null;
+}
+
+/** Primary local copy = lowest binding id (V1.1 presentation rule). */
+export function primaryLocalBindingId(projectId: number): number | null {
+  const row = getDb()
+    .prepare(
+      "SELECT MIN(id) AS id FROM local_repositories WHERE project_id = ?",
+    )
+    .get(projectId) as { id: number | null };
+  return row.id ?? null;
+}
+
+export function deriveSourceState(projectId: number): SourceState {
+  const gh = githubBindingForProject(projectId);
+  const locals = localBindingCount(projectId);
+  if (locals > 0 && gh != null) return "LOCAL + GITHUB";
+  if (locals > 0) return "LOCAL ONLY";
+  return "GITHUB ONLY";
+}
+
+export function githubMetadataForProject(projectId: number): GitHubMetadataDto | null {
+  const binding = githubBindingForProject(projectId);
+  if (!binding) return null;
+  return {
+    owner: binding.owner,
+    name: binding.name,
+    fullName: binding.full_name,
+    visibility: binding.visibility,
+    defaultBranch: binding.default_branch,
+    htmlUrl: binding.html_url ?? `https://github.com/${binding.owner}/${binding.name}`,
+    lastPushedAt: binding.last_pushed_at,
+  };
+}
+
+export type ProjectListItemDto = {
+  id: number;
+  name: string;
+  sourceState: SourceState;
+  projectStatus: ProjectStatus | null;
+  projectType: ProjectType | null;
+  includeInPortfolio: boolean;
+  portfolioOrder: number | null;
+  /** Primary local copy path; null for GITHUB ONLY projects. */
+  localPath: string | null;
+  githubFullName: string | null;
+  githubHtmlUrl: string | null;
+  lastMeaningfulAt: string | null;
+};
+
+export function listProjects(filter?: { state?: string; query?: string }): ProjectListItemDto[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, name, project_status, project_type, project_note,
+              include_in_portfolio, portfolio_order, created_at, updated_at
+       FROM projects ORDER BY name COLLATE NOCASE ASC, id ASC`,
+    )
+    .all() as ProjectRow[];
+
+  const items: ProjectListItemDto[] = rows.map((row) => {
+    const state = deriveSourceState(row.id);
+    const gh = githubBindingForProject(row.id);
+    const primaryLocal =
+      (
+        getDb()
+          .prepare(
+            "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
+          )
+          .get(row.id) as { local_path: string } | undefined
+      )?.local_path ?? null;
+    return {
+      id: row.id,
+      name: row.name,
+      sourceState: state,
+      projectStatus: row.project_status,
+      projectType: row.project_type,
+      includeInPortfolio: row.include_in_portfolio === 1,
+      portfolioOrder: row.portfolio_order,
+      localPath: primaryLocal,
+      githubFullName: gh?.full_name ?? null,
+      githubHtmlUrl:
+        gh?.html_url ??
+        (gh ? `https://github.com/${gh.owner}/${gh.name}` : null),
+      lastMeaningfulAt: lastMeaningfulAt(row.id),
+    };
+  });
+
+  const query = filter?.query?.trim().toLowerCase();
+  return items.filter((item) => {
+    if (filter?.state && filter.state !== "ALL" && item.sourceState !== filter.state) {
+      return false;
+    }
+    if (query) {
+      const haystack = `${item.name} ${item.localPath ?? ""} ${item.githubFullName ?? ""}`.toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
+}
+
+/** Source-aware project detail. Unavailable local fields are null by design. */
+export async function getProjectDetail(id: number): Promise<{
+  project: ProjectListItemDto & {
+    projectNote: string | null;
+    snapshot: SnapshotDto | null;
+    githubMetadata: GitHubMetadataDto | null;
+    commits: Array<{ sha: string; shortSha: string; subject: string; authorName: string | null; committedAt: string | null; source: "local" | "github" }>;
+  };
+}> {
+  const row = getProjectRow(id);
+  const state = deriveSourceState(id);
+  const gh = githubBindingForProject(id);
+  const db = getDb();
+
+  let snapshot = null as SnapshotDto | null;
+  let localCommits: Array<{ sha: string; shortSha: string; subject: string; authorName: string | null; committedAt: string | null; source: "local" | "github" }> = [];
+  const primaryBinding = primaryLocalBindingId(id);
+  if (primaryBinding != null && state !== "GITHUB ONLY") {
+    const snapRow = db
+      .prepare(
+        `SELECT branch, head_commit_sha, is_dirty, modified_count, staged_count,
+                untracked_count, upstream_ref, ahead_count, behind_count, captured_at
+         FROM repository_snapshots WHERE local_repository_id = ?
+         ORDER BY captured_at DESC, id DESC LIMIT 1`,
+      )
+      .get(primaryBinding) as Record<string, unknown> | undefined;
+    if (snapRow) {
+      snapshot = {
+        branch: snapRow.branch as string | null,
+        headCommitSha: snapRow.head_commit_sha as string | null,
+        isDirty: snapRow.is_dirty === 1,
+        modifiedCount: snapRow.modified_count as number,
+        stagedCount: snapRow.staged_count as number,
+        untrackedCount: snapRow.untracked_count as number,
+        upstreamRef: snapRow.upstream_ref as string | null,
+        aheadCount: snapRow.ahead_count as number | null,
+        behindCount: snapRow.behind_count as number | null,
+        capturedAt: snapRow.captured_at as string,
+      };
+    }
+    const locals = db
+      .prepare(
+        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at
+         FROM commits WHERE local_repository_id = ?
+         ORDER BY committed_at DESC, id DESC LIMIT 20`,
+      )
+      .all(primaryBinding) as Array<{ sha: string; subject: string; authorName: string | null; committedAt: string | null }>;
+    localCommits = locals.map((row2) => ({
+      sha: row2.sha,
+      shortSha: row2.sha.slice(0, 7),
+      subject: row2.subject,
+      authorName: row2.authorName,
+      committedAt: row2.committedAt,
+      source: "local" as const,
+    }));
+  }
+
+  // GitHub-only commits fill the history for GITHUB ONLY projects.
+  let githubCommits: typeof localCommits = [];
+  if (state === "GITHUB ONLY" && gh) {
+    const gcs = db
+      .prepare(
+        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at
+         FROM github_commits WHERE github_repository_id = ?
+         ORDER BY committed_at DESC, id DESC LIMIT 20`,
+      )
+      .all(gh.id) as Array<{ sha: string; subject: string | null; authorName: string | null; committedAt: string | null }>;
+    githubCommits = gcs.map((row2) => ({
+      sha: row2.sha,
+      shortSha: row2.sha.slice(0, 7),
+      subject: row2.subject ?? "(no subject)",
+      authorName: row2.authorName,
+      committedAt: row2.committedAt,
+      source: "github" as const,
+    }));
+  }
+
+  return {
+    project: {
+      id: row.id,
+      name: row.name,
+      sourceState: state,
+      projectStatus: row.project_status,
+      projectType: row.project_type,
+      projectNote: row.project_note,
+      includeInPortfolio: row.include_in_portfolio === 1,
+      portfolioOrder: row.portfolio_order,
+      localPath:
+        (
+          db
+            .prepare(
+              "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
+            )
+            .get(row.id) as { local_path: string } | undefined
+        )?.local_path ?? null,
+      githubFullName: gh?.full_name ?? null,
+      githubHtmlUrl: gh?.html_url ?? (gh ? `https://github.com/${gh.owner}/${gh.name}` : null),
+      lastMeaningfulAt: lastMeaningfulAt(row.id),
+      snapshot,
+      githubMetadata: githubMetadataForProject(id),
+      commits: [...localCommits, ...githubCommits],
+    },
+  };
+}
+
+/**
+ * Find a local binding whose parsed GitHub remote identity matches
+ * owner/name. Identity comparison is case-insensitive.
+ */
+export function findLocalMatch(
+  fullName: string,
+): { projectId: number; repoId: number } | null {
+  const [owner, name] = fullName.split("/");
+  if (!owner || !name || !isSafeSegment(owner) || !isSafeSegment(name)) return null;
+  const rows = getDb()
+    .prepare(
+      `SELECT lr.project_id AS projectId, lr.id AS repoId, r.url
+       FROM local_repositories lr
+       JOIN git_remotes r ON r.local_repository_id = lr.id
+       WHERE lr.project_id IS NOT NULL`,
+    )
+    .all() as Array<{ projectId: number; repoId: number; url: string }>;
+  for (const row of rows) {
+    const parsed = parseGitHubRemote(row.url);
+    if (
+      parsed &&
+      parsed.owner.toLowerCase() === owner.toLowerCase() &&
+      parsed.repository.toLowerCase() === name.toLowerCase()
+    ) {
+      return { projectId: row.projectId, repoId: row.repoId };
+    }
+  }
+  return null;
+}
+
+/**
+ * Track a GitHub repository (never clones). Links to the existing project
+ * when a local binding's remote identity matches; otherwise creates a new
+ * GITHUB ONLY project. Offline-safe: metadata fetch failure still tracks.
+ */
+export async function trackGitHubRepository(input: {
+  fullName: unknown;
+}): Promise<{ githubRepositoryId: number; projectId: number; state: SourceState }> {
+  if (typeof input.fullName !== "string" || !/^[^/\s]+\/[^/\s]+$/.test(input.fullName)) {
+    throw new AppError(ErrorCodes.INVALID_REQUEST, "fullName must be owner/name.");
+  }
+  const [owner, name] = input.fullName.split("/");
+  if (!isSafeSegment(owner) || !isSafeSegment(name)) {
+    throw new AppError(ErrorCodes.INVALID_REQUEST, "Invalid repository identity.");
+  }
+
+  const db = getDb();
+  const now = nowIso();
+
+  let metadata: Awaited<ReturnType<typeof fetchGitHubRepoMetadata>> = null;
+  try {
+    metadata = await fetchGitHubRepoMetadata(owner, name);
+  } catch {
+    metadata = null; // offline tracking allowed; cache fields stay stale/null
+  }
+
+  const resolvedOwner = metadata?.owner ?? owner;
+  const resolvedName = metadata?.name ?? name;
+  const fullName = `${resolvedOwner}/${resolvedName}`;
+
+  return withTransaction(async () => {
+    const existing = db
+      .prepare(
+        "SELECT id, project_id FROM github_repositories WHERE owner_norm = lower(?) AND name_norm = lower(?)",
+      )
+      .get(resolvedOwner, resolvedName) as
+      | { id: number; project_id: number | null }
+      | undefined;
+
+    if (existing?.project_id != null) {
+      throw new AppError(ErrorCodes.ALREADY_TRACKED, "That repository is already tracked.", 409);
+    }
+
+    // Link-first: an existing local binding's remote identity wins so the
+    // project becomes LOCAL + GITHUB without duplication.
+    const match = findLocalMatch(fullName);
+    const projectId =
+      match?.projectId ??
+      Number(
+        db
+          .prepare("INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)")
+          .run(resolvedName, now, now).lastInsertRowid,
+      );
+
+    let ghId: number;
+    if (existing) {
+      ghId = existing.id;
+      db.prepare(
+        `UPDATE github_repositories SET
+           project_id = ?, tracked_at = ?, last_refreshed_at = ?,
+           full_name = ?, html_url = COALESCE(?, html_url),
+           visibility = COALESCE(?, visibility),
+           default_branch = COALESCE(?, default_branch),
+           last_pushed_at = COALESCE(?, last_pushed_at)
+         WHERE id = ?`,
+      ).run(
+        projectId,
+        now,
+        now,
+        fullName,
+        metadata?.htmlUrl ?? null,
+        metadata?.visibility ?? null,
+        metadata?.defaultBranch ?? null,
+        metadata?.lastPushedAt ?? null,
+        ghId,
+      );
+    } else {
+      const insert = db
+        .prepare(
+          `INSERT INTO github_repositories
+            (owner, name, full_name, owner_norm, name_norm, visibility, default_branch,
+             html_url, last_pushed_at, last_refreshed_at, project_id, tracked_at)
+           VALUES (?, ?, ?, lower(?), lower(?), ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          resolvedOwner,
+          resolvedName,
+          fullName,
+          resolvedOwner,
+          resolvedName,
+          metadata?.visibility ?? null,
+          metadata?.defaultBranch ?? null,
+          metadata?.htmlUrl ?? `https://github.com/${resolvedOwner}/${resolvedName}`,
+          metadata?.lastPushedAt ?? null,
+          now,
+          projectId,
+          now,
+        );
+      ghId = Number(insert.lastInsertRowid);
+    }
+
+    persistActivityEventsDirect(projectId, [
+      {
+        eventType: "github_repo_tracked",
+        summary: `GitHub repository tracked: ${fullName}`,
+        occurredAt: now,
+        fingerprint: projectScopedFingerprint(projectId, `github_repo_tracked:${fullName.toLowerCase()}`),
+        metadata: { projectId, fullName },
+      },
+    ]);
+
+    return { githubRepositoryId: ghId, projectId, state: deriveSourceState(projectId) };
+  });
+}
+
+/**
+ * Disconnect/untrack a GitHub binding (Q1 lifecycle, LOCKED).
+ */
+export async function untrackGitHubRepository(input: {
+  githubRepositoryId: number;
+  confirmDeleteProject: boolean;
+}): Promise<{ ok: true; projectDeleted: boolean }> {
+  const db = getDb();
+  const binding = db
+    .prepare("SELECT id, project_id, full_name FROM github_repositories WHERE id = ?")
+    .get(input.githubRepositoryId) as
+    | { id: number; project_id: number | null; full_name: string }
+    | undefined;
+  if (!binding || binding.project_id == null) {
+    throw new AppError(
+      ErrorCodes.GITHUB_REPO_NOT_FOUND,
+      "Tracked GitHub repository was not found.",
+      404,
+    );
+  }
+  const projectId = binding.project_id;
+
+  return withTransaction(async () => {
+    // Detach the binding; cached data is retained but excluded from live
+    // views automatically (queries join through project_id).
+    db.prepare(
+      "UPDATE github_repositories SET project_id = NULL, tracked_at = NULL WHERE id = ?",
+    ).run(binding.id);
+
+    if (localBindingCount(projectId) > 0) {
+      persistActivityEventsDirect(projectId, [
+        {
+          eventType: "github_repo_untracked",
+          summary: `GitHub repository disconnected: ${binding.full_name}`,
+          occurredAt: nowIso(),
+          fingerprint: projectScopedFingerprint(
+            projectId,
+            `github_repo_untracked:${Date.now()}`,
+          ),
+          metadata: { projectId, fullName: binding.full_name },
+        },
+      ]);
+      // LOCAL + GITHUB -> LOCAL ONLY; metadata lives on the project.
+      return { ok: true as const, projectDeleted: false };
+    }
+
+    // GITHUB ONLY -> project loses its only binding.
+    if (!input.confirmDeleteProject && projectHasMeaningfulState(projectId)) {
+      throw new AppError(
+        ErrorCodes.PROJECT_HAS_NO_SOURCES,
+        "This project has notes/status/portfolio state/history. Confirm deletion.",
+        409,
+      );
+    }
+    deleteProjectCascade(projectId);
+    return { ok: true as const, projectDeleted: true };
+  });
+}
+
+/**
+ * Q1 emptiness proof: auto-delete only when provably no meaningful state.
+ */
+export function projectHasMeaningfulState(projectId: number): boolean {
+  const db = getDb();
+  const project = db
+    .prepare(
+      `SELECT project_status, project_type, project_note, include_in_portfolio
+       FROM projects WHERE id = ?`,
+    )
+    .get(projectId) as
+    | {
+        project_status: ProjectStatus | null;
+        project_type: ProjectType | null;
+        project_note: string | null;
+        include_in_portfolio: number;
+      }
+    | undefined;
+  if (!project) return false;
+  if (
+    project.project_status != null ||
+    project.project_type != null ||
+    project.project_note != null ||
+    project.include_in_portfolio === 1
+  ) {
+    return true;
+  }
+  const commits =
+    (
+      db
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM commits c
+              JOIN local_repositories lr ON lr.id = c.local_repository_id
+              WHERE lr.project_id = ?) +
+             (SELECT COUNT(*) FROM github_commits gc WHERE gc.project_id = ?)
+             AS n`,
+        )
+        .get(projectId, projectId) as { n: number }
+    ).n > 0;
+  const events =
+    (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM activity_events WHERE project_id = ? AND event_type NOT IN ('github_repo_tracked','github_repo_untracked')",
+        )
+        .get(projectId) as { n: number }
+    ).n > 0;
+  return commits || events;
+}
+
+function deleteProjectCascade(projectId: number): void {
+  const db = getDb();
+  db.prepare("DELETE FROM github_commits WHERE project_id = ?").run(projectId);
+  db.prepare(
+    "UPDATE github_repositories SET project_id = NULL, tracked_at = NULL WHERE project_id = ?",
+  ).run(projectId);
+  db.prepare("DELETE FROM activity_events WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM local_repositories WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+}
+
+/**
+ * Project-scoped fingerprint. The second segment mirrors the legacy
+ * repo-id namespace: the primary local binding when one exists (so
+ * pre-V1.1 style identities stay stable), else the project itself.
+ */
+function projectScopedFingerprint(projectId: number, rest: string): string {
+  const scope = primaryLocalBindingId(projectId) ?? projectId;
+  return `p${projectId}:${scope}:${rest}`;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata ownership lives on Project.
+// ---------------------------------------------------------------------------
+
+const METADATA_ERROR =
+  "Metadata is invalid. Provide valid projectStatus/projectType values, a note of at most 500 characters, and a boolean portfolio flag.";
+
+function metadataError(): AppError {
+  return new AppError(ErrorCodes.INVALID_METADATA, METADATA_ERROR);
+}
+
+export async function updateProjectMetadata(
+  id: number,
+  input: unknown,
+): Promise<void> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw metadataError();
+  }
+  const body = input as Record<string, unknown>;
+  const allowed = [
+    "projectStatus",
+    "projectType",
+    "projectNote",
+    "includeInPortfolio",
+    "portfolioOrder",
+  ];
+  if (Object.keys(body).some((key) => !allowed.includes(key))) {
+    throw metadataError();
+  }
+
+  let nextStatus: ProjectStatus | null | undefined;
+  if (body.projectStatus !== undefined) {
+    if (body.projectStatus === null) nextStatus = null;
+    else if (
+      typeof body.projectStatus === "string" &&
+      (PROJECT_STATUSES as readonly string[]).includes(body.projectStatus)
+    ) {
+      nextStatus = body.projectStatus as ProjectStatus;
+    } else throw metadataError();
+  }
+  let nextType: ProjectType | null | undefined;
+  if (body.projectType !== undefined) {
+    if (body.projectType === null) nextType = null;
+    else if (
+      typeof body.projectType === "string" &&
+      (PROJECT_TYPES as readonly string[]).includes(body.projectType)
+    ) {
+      nextType = body.projectType as ProjectType;
+    } else throw metadataError();
+  }
+  let nextNote: string | null | undefined;
+  if (body.projectNote !== undefined) {
+    if (body.projectNote === null) nextNote = null;
+    else if (typeof body.projectNote === "string") {
+      const trimmed = body.projectNote.trim();
+      if (trimmed.length > 500) throw metadataError();
+      nextNote = trimmed.length > 0 ? trimmed : null;
+    } else throw metadataError();
+  }
+  let nextInclude: boolean | undefined;
+  if (body.includeInPortfolio !== undefined) {
+    if (typeof body.includeInPortfolio === "boolean") nextInclude = body.includeInPortfolio;
+    else throw metadataError();
+  }
+  let nextOrder: number | null | undefined;
+  if (body.portfolioOrder !== undefined) {
+    if (body.portfolioOrder === null) nextOrder = null;
+    else if (typeof body.portfolioOrder === "number" && Number.isInteger(body.portfolioOrder)) {
+      nextOrder = body.portfolioOrder;
+    } else throw metadataError();
+  }
+
+  const project = getProjectRow(id);
+  const observedAt = nowIso();
+
+  if (nextStatus !== undefined && nextStatus !== project.project_status) {
+    persistActivityEventsDirect(id, [
+      {
+        eventType: "project_status_changed",
+        summary: `Project status changed from ${project.project_status ?? "—"} to ${nextStatus ?? "—"}`,
+        occurredAt: observedAt,
+        fingerprint: projectScopedFingerprint(
+          id,
+          `project_status_changed:${project.project_status ?? "none"}->${nextStatus ?? "none"}`,
+        ),
+        metadata: { from: project.project_status, to: nextStatus },
+      },
+    ]);
+  }
+  if (nextNote !== undefined && nextNote !== project.project_note) {
+    persistActivityEventsDirect(id, [
+      {
+        eventType: "project_note_updated",
+        summary: `Project note updated${nextNote ? `: ${nextNote}` : ""}`,
+        occurredAt: observedAt,
+        fingerprint: projectScopedFingerprint(
+          id,
+          `project_note_updated:${hashNote(nextNote ?? "")}`,
+        ),
+        metadata: { length: (nextNote ?? "").length },
+      },
+    ]);
+  }
+
+  withTransaction(() => {
+    getDb()
+      .prepare(
+        `UPDATE projects SET
+           project_status = CASE WHEN ?1 THEN ?2 ELSE project_status END,
+           project_type   = CASE WHEN ?3 THEN ?4 ELSE project_type END,
+           project_note   = CASE WHEN ?5 THEN ?6 ELSE project_note END,
+           include_in_portfolio = CASE WHEN ?7 THEN ?8 ELSE include_in_portfolio END,
+           portfolio_order = CASE WHEN ?9 THEN ?10 ELSE portfolio_order END,
+           updated_at = ?11
+         WHERE id = ?12`,
+      )
+      .run(
+        nextStatus !== undefined ? 1 : 0,
+        nextStatus ?? null,
+        nextType !== undefined ? 1 : 0,
+        nextType ?? null,
+        nextNote !== undefined ? 1 : 0,
+        nextNote ?? null,
+        nextInclude !== undefined ? 1 : 0,
+        nextInclude === true ? 1 : 0,
+        nextOrder !== undefined ? 1 : 0,
+        nextOrder ?? null,
+        nowIso(),
+        id,
+      );
+  });
+}
+
+import { createHash } from "node:crypto";
+
+function hashNote(note: string): string {
+  return createHash("sha256").update(note).digest("hex").slice(0, 12);
+}

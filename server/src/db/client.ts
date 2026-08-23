@@ -49,6 +49,28 @@ export function withTransaction<T>(fn: () => T): T {
   database.exec("BEGIN IMMEDIATE;");
   try {
     const result = fn();
+    if (
+      result != null &&
+      typeof (result as { then?: unknown }).then === "function"
+    ) {
+      // Async work must stay inside the transaction: commit on resolution,
+      // roll back on rejection — a rejected callback must never leave the
+      // transaction dangling with uncommitted writes visible on the wire.
+      return (result as unknown as Promise<T>).then(
+        (value) => {
+          database.exec("COMMIT;");
+          return value;
+        },
+        (err) => {
+          try {
+            database.exec("ROLLBACK;");
+          } catch {
+            // ignore
+          }
+          throw err;
+        },
+      ) as T;
+    }
     database.exec("COMMIT;");
     return result;
   } catch (err) {

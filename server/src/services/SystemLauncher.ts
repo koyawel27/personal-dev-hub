@@ -99,6 +99,8 @@ export function launchRepositoryAction(
   const repo = getTrackedRepo(repositoryId);
   const repoPath = repo.local_path;
 
+  // Source-awareness (V1.1): local-only actions require a real checkout;
+  // the Open GitHub action is valid for any GitHub-linked repository.
   if (action !== "github") {
     if (!fs.existsSync(repoPath)) {
       throw new AppError(

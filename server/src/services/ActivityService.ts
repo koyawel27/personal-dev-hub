@@ -135,17 +135,28 @@ export function persistActivityEvents(
   repositoryId: number,
   events: DerivedEvent[],
 ): void {
-  if (events.length === 0) return;
-  const db = getDb();
-  // Since 004/006, events are project-owned and fingerprints are
-  // project-scoped: "p{projectId}:{legacyRepoScopedFingerprint}".
-  const row = db
+  const row = getDb()
     .prepare("SELECT project_id FROM local_repositories WHERE id = ?")
     .get(repositoryId) as { project_id: number | null } | undefined;
-  const projectId = row?.project_id;
-  if (projectId == null) {
+  if (!row || row.project_id == null) {
     throw new Error(`Repository ${repositoryId} has no project mapping.`);
   }
+  persistActivityEventsDirect(row.project_id, events, repositoryId);
+}
+
+/**
+ * Project-owned event persistence (V1.1). Fingerprints are project-scoped:
+ * "p{projectId}:{scope}:{detail}". When a local binding originated the
+ * event, its id is stored on the row; project-level events pass null.
+ */
+export function persistActivityEventsDirect(
+  projectId: number,
+  events: DerivedEvent[],
+  repositoryId: number | null = null,
+): void {
+  if (events.length === 0) return;
+  const db = getDb();
+  const scope = repositoryId ?? projectId;
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO activity_events
       (project_id, local_repository_id, event_type, summary, occurred_at, source, fingerprint, metadata_json)
@@ -158,8 +169,8 @@ export function persistActivityEvents(
       event.eventType,
       event.summary,
       event.occurredAt,
-      "scan",
-      `p${projectId}:${event.fingerprint}`,
+      event.eventType.startsWith("github_") ? "user" : "scan",
+      `p${projectId}:${scope}:${event.fingerprint.replace(/^p\d+:\d+:/, "")}`,
       JSON.stringify(event.metadata),
     );
   }

@@ -25,6 +25,14 @@ import {
 } from "./services/RepositoryService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
 import {
+  deriveSourceState,
+  getProjectDetail,
+  listProjects,
+  trackGitHubRepository,
+  untrackGitHubRepository,
+  updateProjectMetadata,
+} from "./services/ProjectService.js";
+import {
   contributionDays,
   dailyDetail,
 } from "./services/ContributionService.js";
@@ -167,6 +175,59 @@ export function createApp(): express.Express {
     try {
       deleteRepository(requireId(req.params.id, "repository"));
       res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/projects", (req, res, next) => {
+    try {
+      const state = typeof req.query.state === "string" ? req.query.state : undefined;
+      const query = typeof req.query.query === "string" ? req.query.query : undefined;
+      res.json({ projects: listProjects({ state, query }) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/projects/:id", async (req, res, next) => {
+    try {
+      const project = await getProjectDetail(requireId(req.params.id, "repository"));
+      res.json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.patch("/api/projects/:id/metadata", async (req, res, next) => {
+    try {
+      await updateProjectMetadata(requireId(req.params.id, "repository"), req.body);
+      const project = await getProjectDetail(requireId(req.params.id, "repository"));
+      res.json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/github/tracked", async (req, res, next) => {
+    try {
+      const result = await trackGitHubRepository({ fullName: req.body?.fullName });
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/api/github/tracked/:id", (req, res, next) => {
+    try {
+      const id = parseNumericId(req.params.id);
+      if (id == null) {
+        throw new AppError(ErrorCodes.GITHUB_REPO_NOT_FOUND, "Not found.", 404);
+      }
+      const confirmDeleteProject = req.query.confirmDeleteProject === "true";
+      untrackGitHubRepository({ githubRepositoryId: id, confirmDeleteProject })
+        .then((result) => res.json(result))
+        .catch(next);
     } catch (err) {
       next(err);
     }

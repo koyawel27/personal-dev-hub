@@ -79,7 +79,14 @@ export type EventType =
   | "working_tree_clean"
   | "branch_changed"
   | "ahead_changed"
-  | "behind_changed";
+  | "behind_changed"
+  | "github_repo_tracked"
+  | "github_repo_untracked"
+  | "github_commit_observed"
+  | "github_binding_updated";
+
+/** First-class source composition of a Project (derived, never stored). */
+export type SourceState = "LOCAL + GITHUB" | "LOCAL ONLY" | "GITHUB ONLY";
 
 /** Compact per-project summary used by Dashboard "Recently Active". */
 export type RecentlyActiveProjectDto = {
