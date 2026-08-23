@@ -546,6 +546,41 @@ button.cell:hover:not(:disabled) {
   cursor: default;
 }
 
+/* ---------- portfolio ---------- */
+
+.portfolio-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 2px;
+  border-bottom: 1px dashed var(--border-strong);
+}
+
+.portfolio-item:last-child {
+  border-bottom: none;
+}
+
+.portfolio-main {
+  min-width: 0;
+}
+
+.portfolio-main .row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.portfolio-main p {
+  margin: 6px 0 4px;
+}
+
+.portfolio-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1100px) {

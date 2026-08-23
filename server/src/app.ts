@@ -28,6 +28,7 @@ import {
   contributionDays,
   dailyDetail,
 } from "./services/ContributionService.js";
+import { listPortfolio } from "./services/PortfolioService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -215,6 +216,14 @@ export function createApp(): express.Express {
   app.get("/api/contributions/:day", (req, res, next) => {
     try {
       res.json(dailyDetail(req.params.day));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/portfolio", (_req, res, next) => {
+    try {
+      res.json({ projects: listPortfolio() });
     } catch (err) {
       next(err);
     }

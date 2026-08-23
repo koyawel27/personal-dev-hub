@@ -54,6 +54,22 @@ export type DailyDetailResponse = {
   projects: DailyProjectCommits[];
 };
 
+/** Selected-work item generated from tracked data (spec section 10). */
+export type PortfolioItemDto = {
+  id: number;
+  name: string;
+  projectType: ProjectType | null;
+  projectStatus: ProjectStatus | null;
+  projectNote: string | null;
+  githubHtmlUrl: string | null;
+  portfolioOrder: number | null;
+  /** Honest manifest-derived hints; empty when nothing recognizable. */
+  technologyHints: string[];
+  firstCommitAt: string | null;
+  latestCommitAt: string | null;
+  lastMeaningfulAt: string | null;
+};
+
 export type EventType =
   | "repository_discovered"
   | "commit_observed"

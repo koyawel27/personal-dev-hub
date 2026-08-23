@@ -6,6 +6,7 @@ import type {
   DashboardResponse,
   GitHubStatusDto,
   HealthResponse,
+  PortfolioItemDto,
   RepositoryDetail,
   RepositoryListItem,
   ScanSummary,
@@ -93,4 +94,6 @@ export const client = {
   contributions: () => api<{ days: ContributionDayDto[] }>("/api/contributions"),
   contributionDay: (day: string) =>
     api<DailyDetailResponse>(`/api/contributions/${day}`),
+  portfolio: () =>
+    api<{ projects: PortfolioItemDto[] }>("/api/portfolio"),
 };
