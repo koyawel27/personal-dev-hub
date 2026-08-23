@@ -5,3 +5,6 @@ fixtures/disposable-repo/
 *.log
 .vite
 .DS_Store
+
+# Hermes working artifacts (plans live with the session; the plan doc is preserved in git history)
+.hermes/
