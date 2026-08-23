@@ -7,7 +7,7 @@ const app = createApp();
 
 const server = app.listen(config.port, config.host, () => {
   console.log(
-    `Local Developer Dashboard listening on http://${config.host}:${config.port}`,
+    `Personal Dev Hub listening on http://${config.host}:${config.port}`,
   );
 });
 

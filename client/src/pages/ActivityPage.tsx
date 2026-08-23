@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ActivityEventDto, RepositoryListItem } from "@shared/api-types";
-import { EMPTY_STATES } from "@shared/status-terms";
 import { ApiError, client } from "../api";
-import { eventLabel, formatDateTime } from "../format";
+import { EventFeed } from "../components/EventFeed";
+import { EmptyState } from "../components/EmptyState";
+import { useApi } from "../useApi";
 
 export function ActivityPage() {
   const [events, setEvents] = useState<ActivityEventDto[]>([]);
@@ -69,31 +70,10 @@ export function ActivityPage() {
         </button>
       </form>
       {events.length === 0 ? (
-        <p className="empty">{EMPTY_STATES.noActivity}</p>
+        <EmptyState message="No activity recorded yet." hint={<span>Rescan a tracked project, or commit something in one.</span>} />
       ) : (
         <section className="panel">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Project</th>
-                <th>Type</th>
-                <th>Summary</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((event) => (
-                <tr key={event.id}>
-                  <td>{formatDateTime(event.occurredAt)}</td>
-                  <td>
-                    <Link to={`/projects/${event.localRepositoryId}`}>{event.projectName}</Link>
-                  </td>
-                  <td>{eventLabel(event.eventType)}</td>
-                  <td>{event.summary}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <EventFeed events={events} />
         </section>
       )}
     </div>
