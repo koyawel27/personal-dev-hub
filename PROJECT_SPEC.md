@@ -1,332 +1,473 @@
-# Local Developer Dashboard — V1 Experimental Build Specification
+# Personal Dev Hub — Revised Project Specification
 
-## 1. Purpose
-
-Build a **Windows-first, local-first personal developer dashboard** for one developer on one computer.
-
-The application should answer:
-
-> **What software projects have I been working on, and what state did I leave them in?**
-
-This is also an evaluation project for Grok Build with a limited usage budget. Prefer simple, correct, testable solutions over speculative features or framework complexity.
+> Working title: **Personal Dev Hub**  
+> Repository: `C:\xampp-projects\local-dev-dashboard`  
+> Previous working title: Local Developer Dashboard  
+> Product direction: personal developer workspace / lightweight project tracker  
+> Target: Windows-first, local-first, single-user V1
 
 ---
 
-## 2. Core V1 Scope
+## 1. Product vision
 
-The app tracks **local Git repositories only**.
+Personal Dev Hub is a **single-user, local-first developer workspace** that brings together a developer's local Git repositories and optional GitHub activity into one simple place.
 
-It must support:
+Its purpose is to answer, at a glance:
 
-- multiple configured scan locations, e.g.
-  - `C:\xampp-projects`
-  - `C:\xampp\htdocs`
-- individually added Git repositories outside those locations
-- recursive repository discovery with configurable scan depth
-- read-only Git inspection
-- recent local commits
-- current branch and working-tree state
-- modified, staged, and untracked file counts
-- changed-file list
-- configured Git remotes
-- locally known ahead/behind state
-- activity timeline derived from meaningful state changes
-- optional GitHub metadata for local repositories whose remotes point to GitHub
-- convenience actions:
-  - Open Folder
-  - Open Terminal
-  - Open in VS Code
-  - Open GitHub when applicable
+- What projects am I actively working on?
+- What changed recently?
+- Which repositories have uncommitted or unsynced work?
+- What has my development activity looked like over time?
+- Which projects have I completed, paused, archived, or kept as experiments?
+- Which projects do I want to present as part of a simple personal portfolio?
 
-GitHub is **optional enrichment**, not a dependency.
+The product is inspired by the **developer activity / repository tracking** side of tools such as LogBytes, but it is **not** a clone and must not copy LogBytes' broader professional, corporate, team, proof-pack, or reporting product direction.
+
+The product should feel like a **personal project tracker + development activity journal**, not a corporate productivity platform.
 
 ---
 
-## 3. Hard Safety Boundary
+## 2. Core product principles
 
-The dashboard is **strictly read-only toward tracked repositories**.
+### 2.1 Personal first
 
-It must never perform normal application operations equivalent to:
+The application is for one developer on one machine.
 
-- `git fetch`
-- `git pull`
-- `git push`
-- `git add`
-- `git commit`
-- `git checkout`
-- `git switch`
-- `git reset`
-- `git restore`
-- `git merge`
-- `git rebase`
-- `git cherry-pick`
-- `git stash`
-- `git clean`
+No teams, accounts, permissions, organizations, client spaces, public network, or collaboration model are required in V1.
 
-It must not modify:
+### 2.2 Local-first
 
-- source files
-- working trees
-- staging areas
-- branches
-- Git history
-- remotes
+Local Git repositories are first-class citizens.
 
-Do not build Stage, Commit, Discard, Checkout, Fetch, Pull, Push, Reset, Merge, or similar controls.
+A project must be useful even when it has:
 
-The app may use Git normally while developing **this dashboard repository itself**. The restriction applies to repositories tracked by the running dashboard.
+- no GitHub repository,
+- no remote,
+- no internet connection,
+- no cloud account.
+
+GitHub is optional enrichment, not a requirement.
+
+### 2.3 Repository state supports the product; it is not the product
+
+Git details such as current branch, clean/dirty state, staged/untracked files, ahead/behind, latest commit, and remotes are useful context, but the app's identity is broader:
+
+> **What have I been building, what am I working on now, and what does my development history look like?**
+
+### 2.4 Low-maintenance project tracking
+
+The app should automatically infer as much as possible from Git and GitHub. Manual project metadata should stay lightweight.
+
+### 2.5 Honest activity semantics
+
+The application must never claim to know exact coding time from commits. Terms such as activity, recent activity, active days, commit count, and repository changes are acceptable. Exact hours worked, productivity score, and efficiency score are out of scope.
 
 ---
 
-## 4. Project Discovery
+## 3. Primary user
+
+A developer or student developer who maintains multiple projects across local folders and GitHub and wants a simple personal view of current projects, development activity, repository state, contribution history, project notes, and selected portfolio work.
+
+V1 is explicitly **single-user**.
+
+---
+
+## 4. V1 information architecture
+
+Main navigation:
+
+1. **Dashboard**
+2. **Projects**
+3. **Activity**
+4. **Contributions**
+5. **Portfolio**
+6. **Sources**
+7. **Settings**
+
+Project Detail is accessed from Projects and Dashboard.
+
+---
+
+## 5. Dashboard
+
+The Dashboard should answer:
+
+> **What have I been working on lately?**
+
+It should prioritize recent development activity rather than repository warnings alone.
+
+### 5.1 Summary metrics
+
+Show compact, real values such as:
+
+- Tracked Projects
+- Active Projects
+- Commits This Week
+- Active Days This Week
+- Repositories With Uncommitted Changes
+
+Do not use fake metrics or productivity scores.
+
+### 5.2 Recently Active Projects
+
+Show the projects with the most recent meaningful development activity. Each item should include, where available:
+
+- project name,
+- manual project status,
+- project type,
+- current branch,
+- last meaningful activity time,
+- latest commit subject,
+- clean / uncommitted indicator,
+- GitHub-connected / local-only indicator.
+
+Recent activity must be derived from meaningful developer events, not `last_scanned_at`.
+
+### 5.3 Recent Activity
+
+Show a compact chronological feed across tracked projects. Examples:
+
+- commit observed,
+- working tree became dirty,
+- working tree became clean,
+- branch changed,
+- ahead / behind state changed,
+- repository discovered,
+- project status manually changed,
+- project note updated.
+
+Avoid duplicate events on unchanged rescans.
+
+### 5.4 Needs Attention
+
+A secondary section, not the main identity of the Dashboard.
+
+Potential reasons:
+
+- uncommitted changes,
+- ahead of upstream,
+- behind upstream,
+- ahead and behind,
+- missing upstream,
+- repository path unavailable,
+- GitHub enrichment unavailable.
+
+### 5.5 Contribution preview
+
+Include a compact contribution/activity calendar preview or summary linking to the full Contributions page.
+
+---
+
+## 6. Projects
+
+Projects is the main project tracker and repository explorer.
+
+### 6.1 Project sources
+
+A project may be:
+
+- **Local + GitHub**
+- **Local Only**
+
+GitHub-only projects are **not required for V1** and may be considered for V2.
+
+### 6.2 Project list
+
+Use a dense, scannable list/table rather than giant cards. Each project should show:
+
+- name,
+- local path,
+- project status,
+- project type,
+- current branch,
+- clean / uncommitted state,
+- latest activity,
+- latest commit,
+- ahead / behind state,
+- GitHub-connected / local-only state.
+
+### 6.3 Search and filters
 
 Support:
 
-1. **Scan locations**
-   - path
-   - configurable maximum scan depth
-   - enabled state
-   - last scanned time
+- text search,
+- project status,
+- project type,
+- clean / uncommitted,
+- ahead,
+- behind,
+- GitHub connected,
+- local only.
 
-2. **Individual repositories**
-   - manually added Git repositories outside scan locations
+### 6.4 Manual project metadata
 
-Default scan depth: `3`.
+Each tracked project may have lightweight user-managed metadata.
 
-The scanner must:
+**Status:** Active, Paused, Finished, Archived, Experiment.
 
-- check the scan-source directory itself as a possible Git repository
-- recursively discover repositories up to the configured depth
-- detect repositories through `.git`
-- normalize Windows paths
-- prevent duplicate local repository records
-- tolerate inaccessible directories without failing the whole scan
-- never automatically scan the entire computer
+**Type:** Personal, School, OJT, Client, Experiment, Other.
 
-Skip at least:
+**Notes:** optional short project note, such as “Waiting for adviser feedback” or “Stage 6 blur resize bug remains.”
 
-- `.git`
-- `node_modules`
-- `vendor`
-- `dist`
-- `build`
-- `coverage`
-- `.cache`
-- `.venv`
-- `venv`
-
-Equivalent Windows path forms must not create duplicates.
+**Portfolio inclusion:** Include in Portfolio / Do not include.
 
 ---
 
-## 5. Local Git Information
+## 7. Project Detail
 
-For each tracked repository, determine at least:
+Recommended sections or tabs:
 
-- repository name
-- local path
-- current branch
-- HEAD commit
-- clean / uncommitted state
-- modified file count
-- staged file count
-- untracked file count
-- changed-file list
-- recent commits
-- configured remotes
-- upstream reference when available
-- ahead count
-- behind count
-- last scanned time
-- latest meaningful activity
+1. **Overview**
+2. **Commits**
+3. **Activity**
 
-Ahead/behind state is based only on **locally known remote-tracking references**.
+### 7.1 Overview
 
-The UI must communicate this clearly, e.g.:
+Show:
 
-> Based on locally known remote state.
+- project name,
+- local path,
+- manual status,
+- project type,
+- manual note,
+- current branch,
+- working tree state,
+- changed-file counts,
+- upstream state,
+- ahead / behind,
+- primary remote,
+- GitHub URL if recognized,
+- latest commit,
+- recent activity,
+- portfolio inclusion toggle.
 
-Do not automatically run `git fetch`.
+### 7.2 Changed files
 
-Use the system Git executable.
+Read-only display of current changed files.
 
-Use argument-based process execution such as `execFile` or `spawn` with separate argument arrays. Do not construct shell command strings by concatenating user-controlled paths.
+V1 must not edit, stage, commit, discard, checkout, merge, pull, push, reset, stash, or otherwise mutate repositories.
 
----
+### 7.3 Commits
 
-## 6. GitHub Integration
+Show bounded recent commit history with SHA abbreviation, subject, author, and committed time.
 
-Use the installed **GitHub CLI (`gh`)** for V1.
+### 7.4 Activity
 
-Do not build app-owned GitHub OAuth or token storage.
+Show project-specific chronological activity events.
 
-The application must not store:
+### 7.5 Launcher actions
 
-- GitHub passwords
-- PATs
-- OAuth tokens
-- SSH private keys
+Allowed actions:
 
-Create a small `GitHubService` that can at least:
+- Open Folder
+- Open Terminal
+- Open in VS Code
+- Open GitHub
 
-- detect whether `gh` exists
-- determine authentication status
-- optionally determine the authenticated account
-- retrieve metadata for GitHub repositories linked to tracked local repositories
-
-GitHub failure, missing `gh`, or unauthenticated `gh` must never break local repository scanning or local dashboard functionality.
-
-Recognize at least:
-
-- `https://github.com/owner/repo.git`
-- `git@github.com:owner/repo.git`
-
-Normalize to:
-
-- host
-- owner
-- repository
-
-Non-GitHub remotes remain valid Git remotes but must not be labeled GitHub-connected.
+Launcher APIs must use a registered project/repository ID and resolve the trusted local path server-side. Do not expose arbitrary path or arbitrary command execution endpoints.
 
 ---
 
-## 7. V2 Compatibility — Do Not Implement V2
+## 8. Activity
 
-V2 may later synchronize **all repositories from the connected GitHub account** and distinguish:
+Activity is a global chronological development journal.
 
-- Local + GitHub
-- GitHub only
-- Local only
+### 8.1 Local activity event types
 
-Therefore, local repositories and GitHub repositories must be modeled separately.
+Recommended V1 events:
 
-A GitHub repository may eventually have:
+- `repository_discovered`
+- `commit_observed`
+- `working_tree_dirty`
+- `working_tree_clean`
+- `branch_changed`
+- `ahead_changed`
+- `behind_changed`
+- `project_status_changed`
+- `project_note_updated`
 
-- zero local copies
-- one local copy
-- multiple local copies
+### 8.2 Event timestamps
 
-Do not implement full GitHub-account synchronization now.
+- Commit activity uses actual `committed_at`.
+- State transitions use observation time.
+- Discovery uses discovery time.
+- `last_scanned_at` is operational metadata and must never be treated as development activity.
 
----
+### 8.3 Deduplication
 
-## 8. Architecture
-
-Use:
-
-### Frontend
-- React
-- TypeScript
-- Vite
-
-### Backend
-- Node.js
-- TypeScript
-- Express
-
-### Persistence
-- SQLite
-
-### Git
-- system Git executable
-
-### GitHub
-- `gh`
-
-### Testing
-- Vitest
-
-Keep dependencies modest.
-
-Do not introduce unless a genuine blocker requires it:
-
-- Next.js
-- Electron
-- Tauri
-- Redux
-- large component frameworks
-- large ORMs
-
-V1 officially targets **Windows**.
-
-Backend must bind only to:
-
-`127.0.0.1`
-
-Do not expose it on `0.0.0.0`.
+Rescanning an unchanged repository must not create duplicate activity events. Use stable fingerprints or deterministic transition detection.
 
 ---
 
-## 9. Backend Service Boundaries
+## 9. Contributions
 
-Use small, clear services:
+Contributions is a first-class V1 feature.
 
-### `ProjectDiscoveryService`
-Responsible for:
+### 9.1 Contribution calendar
 
-- scan-source management
-- directory traversal
-- `.git` detection
-- depth limits
-- exclusions
-- canonical path normalization
-- deduplication
+Provide a GitHub-style year/activity heatmap or similar compact calendar visualization, but do not visually clone GitHub or LogBytes exactly.
 
-### `GitService`
-Responsible for structured, read-only Git inspection.
+### 9.2 Activity sources
 
-Possible operations:
+V1 should support at least:
 
-- `isRepository`
-- `getBranch`
-- `getWorkingTreeStatus`
-- `getHeadCommit`
-- `getRecentCommits`
-- `getRemotes`
-- `getUpstream`
-- `getAheadBehind`
+- Local Git commit activity
+- GitHub commit/contribution enrichment when available
+- Combined view where technically reliable
 
-### `RepositoryService`
-Coordinates application-level repository refresh and persistence.
+The UI should make the selected source clear.
 
-### `GitHubService`
-Handles optional `gh`-based enrichment only.
+### 9.3 Daily detail
 
-### `ActivityService`
-Compares previous/current state and creates meaningful, deduplicated events.
+Selecting a day should show useful detail such as:
 
-### `SystemLauncher`
-Explicit actions for registered repositories:
+- commit count,
+- projects involved,
+- commit subjects,
+- local vs GitHub source where applicable.
 
-- open folder
-- open terminal
-- open VS Code
-- open GitHub
+### 9.4 Avoid double-counting
 
-Launcher actions must use stored repository IDs and backend-resolved paths. Do not accept arbitrary execution paths from the browser.
+If a local commit and GitHub enrichment refer to the same commit SHA, do not count it twice in combined activity.
+
+### 9.5 No exact time claims
+
+The calendar represents activity and contributions, not hours worked.
 
 ---
 
-## 10. No Arbitrary Execution API
+## 10. Portfolio
 
-Do not expose general-purpose routes such as:
+Portfolio is intentionally lightweight. It is not a full professional portfolio builder and must not become a second product.
 
-- `/api/exec`
-- `/api/shell`
-- `/api/command`
-- `/api/git-command`
+Its purpose is to reuse the project data already tracked by the app to present selected work clearly.
 
-The frontend requests defined actions. The backend decides what command is executed.
+### 10.1 V1 portfolio view
+
+Show projects marked `Include in Portfolio`. Each selected project may display:
+
+- project name,
+- description or note,
+- project type,
+- status,
+- technology/language hints when available,
+- GitHub URL if connected,
+- development activity summary,
+- first / latest known commit dates.
+
+### 10.2 Local-only first
+
+V1 portfolio can remain a local preview inside the app. No public hosting or publishing service is required.
+
+### 10.3 Explicitly out of scope
+
+Do not build professional experience forms, public account identity, resume builder, team profile, availability status, corporate proof packs, client sharing, public networking, or hosted portfolio publishing.
 
 ---
 
-## 11. Database Model
+## 11. Sources
 
-Keep V1 small. Target approximately these seven tables:
+### 11.1 Scan roots
 
-### `project_sources`
-Suggested fields:
+Support multiple user-configured scan roots. Examples:
+
+- `C:\xampp-projects`
+- `C:\xampp\htdocs`
+- `E:\Projects`
+
+Do not automatically scan the entire system drive.
+
+### 11.2 Discovery rules
+
+Default maximum depth: 3.
+
+Skip common heavy/generated folders such as `node_modules`, `vendor`, `.git`, `dist`, `build`, `coverage`, `.cache`, `.venv`, and `venv`.
+
+Stop descending once a valid Git worktree is identified. Avoid following symlink/junction cycles.
+
+### 11.3 Manual repository add
+
+Allow the user to paste/type a repository path. Validate that it is a Git worktree and reject non-Git folders clearly.
+
+### 11.4 Dedupe
+
+Canonicalize Windows paths and deduplicate case/path variants. The same GitHub repository may legitimately have multiple local copies; local identity remains path-based.
+
+### 11.5 Source removal
+
+Removing a scan root removes only the source configuration. Previously discovered repositories remain registered with `source_id = NULL` until explicitly removed.
+
+Removing a repository from the app must not delete or modify the real filesystem repository.
+
+---
+
+## 12. Settings
+
+Keep Settings minimal. Recommended V1 settings:
+
+- Git executable status
+- GitHub CLI / authentication status when available
+- default scan depth
+- app data location
+- contribution display preferences
+- refresh/rescan controls
+
+---
+
+## 13. Git behavior
+
+The application is **read-only toward tracked Git repositories in V1**.
+
+### 13.1 Exact allowed Git operations
+
+Use safe process execution with argument arrays, never shell-concatenated user input.
+
+The V1 Git adapter may use explicitly implemented read-only operations such as:
+
+- `git rev-parse --is-inside-work-tree`
+- `git rev-parse --abbrev-ref HEAD`
+- `git rev-parse HEAD`
+- `git status --porcelain=v1 -uall`
+- bounded `git log`
+- `git remote -v`
+- `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`
+- `git rev-list --left-right --count @{upstream}...HEAD`
+
+Do not expose a generic “run git command” endpoint.
+
+### 13.2 No automatic fetch
+
+Ahead/behind is computed from local remote-tracking refs already present. The app must not automatically fetch, pull, push, commit, reset, checkout, merge, rebase, stash, stage, discard, or mutate repository state.
+
+---
+
+## 14. GitHub integration
+
+GitHub is optional enrichment. The app must fully work without GitHub authentication.
+
+### 14.1 Remote recognition
+
+Recognize common GitHub HTTPS and SSH remotes. Parse host, owner, repository name, and normalized GitHub URL.
+
+Open GitHub should work from a recognized remote even when GitHub CLI enrichment is unavailable.
+
+### 14.2 Authentication
+
+Prefer existing `gh` authentication if available. Do not store GitHub personal access tokens inside the application's own database.
+
+### 14.3 Enrichment
+
+When available, GitHub enrichment may provide repository metadata, default branch, visibility, pushed-at timestamps, and contribution information needed by the Contributions page.
+
+GitHub outages or missing authentication must not break local functionality.
+
+---
+
+## 15. Data model direction
+
+The existing partial implementation may already contain some of these concepts. Reuse compatible work rather than rewriting blindly.
+
+### 15.1 `project_sources`
 
 - id
 - path
@@ -336,24 +477,23 @@ Suggested fields:
 - created_at
 - last_scanned_at
 
-### `local_repositories`
-Suggested fields:
+### 15.2 `local_repositories`
 
 - id
 - source_id nullable
 - name
 - local_path
-- canonical_path
-- discovery_type (`scanned` / `manual`)
+- canonical_path unique
+- discovery_type
+- project_status
+- project_type
+- project_note
+- include_in_portfolio
+- portfolio_order nullable
 - created_at
 - last_scanned_at
 
-`canonical_path` must be unique.
-
-For V1, one displayed project equals one local Git repository.
-
-### `repository_snapshots`
-Suggested fields:
+### 15.3 `repository_snapshots`
 
 - id
 - local_repository_id
@@ -368,8 +508,7 @@ Suggested fields:
 - behind_count
 - captured_at
 
-### `git_remotes`
-Suggested fields:
+### 15.4 `git_remotes`
 
 - id
 - local_repository_id
@@ -382,8 +521,7 @@ Suggested fields:
 - is_primary
 - last_seen_at
 
-### `github_repositories`
-Suggested fields:
+### 15.5 `github_repositories`
 
 - id
 - owner
@@ -395,8 +533,7 @@ Suggested fields:
 - last_pushed_at
 - last_refreshed_at
 
-### `commits`
-Suggested fields:
+### 15.6 `commits`
 
 - id
 - local_repository_id
@@ -406,12 +543,11 @@ Suggested fields:
 - committed_at
 - first_seen_at
 
-Unique key: local repository + commit SHA.
+Unique: `(local_repository_id, commit_sha)`.
 
-Use bounded recent history rather than unlimited history.
+Commit history should be bounded.
 
-### `activity_events`
-Suggested fields:
+### 15.7 `activity_events`
 
 - id
 - local_repository_id
@@ -422,570 +558,351 @@ Suggested fields:
 - fingerprint
 - metadata_json
 
-Useful event types:
+### 15.8 Contribution data
 
-- `repository_discovered`
-- `commit`
-- `working_tree_dirty`
-- `working_tree_clean`
-- `branch_changed`
-- `ahead_changed`
-- `behind_changed`
-
-Do not create duplicate activity for unchanged repeated rescans.
-
-The database must not store source-code contents, full diffs, secrets, or terminal history.
+Prefer deriving contribution views from commits/activity where practical. If GitHub enrichment requires cached contribution-day aggregates, add a dedicated cache table only when justified.
 
 ---
 
-## 12. API Shape
+## 16. Refresh / rescan correctness
 
-Keep the API small.
+Recommended order:
 
-Suggested routes:
+1. Load previous snapshot and known commits.
+2. Inspect repository using safe read-only Git operations.
+3. Parse remotes and GitHub identity.
+4. Determine newly observed commits and state transitions.
+5. Derive activity events.
+6. Persist snapshot, remotes, commits, and activity events atomically where appropriate.
+7. Perform optional GitHub enrichment separately so GitHub failure does not roll back valid local state.
 
-### Health
-- `GET /api/health`
-
-### Sources
-- `GET /api/sources`
-- `POST /api/sources`
-- `DELETE /api/sources/:id`
-- `POST /api/sources/:id/scan`
-
-### Repositories
-- `POST /api/repositories/manual`
-- `GET /api/repositories`
-- `GET /api/repositories/:id`
-- `POST /api/repositories/:id/refresh`
-
-### Global Scan
-- `POST /api/scans`
-
-Use synchronous scanning initially unless real performance proves a background-job model is necessary.
-
-### Activity
-- `GET /api/activity`
-
-Support basic repository/date filtering.
-
-### Dashboard
-- `GET /api/dashboard`
-
-Return:
-
-- tracked projects
-- uncommitted projects
-- active this week
-- commits this week
-- needs attention
-- recent projects
-- recent activity
-
-### GitHub
-- `GET /api/github/status`
-
-### Launcher Actions
-- `POST /api/repositories/:id/open/folder`
-- `POST /api/repositories/:id/open/terminal`
-- `POST /api/repositories/:id/open/vscode`
-- `POST /api/repositories/:id/open/github`
-
-Expected errors should use a consistent shape such as:
-
-```json
-{
-  "error": {
-    "code": "NOT_GIT_REPOSITORY",
-    "message": "The selected folder is not a Git repository."
-  }
-}
-```
-
-Useful error codes include:
-
-- `INVALID_PATH`
-- `PATH_NOT_FOUND`
-- `NOT_GIT_REPOSITORY`
-- `SOURCE_ALREADY_EXISTS`
-- `REPOSITORY_ALREADY_TRACKED`
-- `REPOSITORY_NOT_FOUND`
-- `GIT_UNAVAILABLE`
-- `GITHUB_UNAVAILABLE`
-- `GITHUB_NOT_AUTHENTICATED`
-- `INTERNAL_ERROR`
+SQLite foreign keys must be enabled.
 
 ---
 
-## 13. UI Information Architecture
+## 17. Technology baseline
 
-Use a **left sidebar** with five main destinations:
+Keep the existing V1 architecture unless the continuation audit finds a real incompatibility.
 
-- Dashboard
-- Projects
-- Activity
-- Sources
-- Settings
+### Frontend
 
-Project Detail is a drill-down from Projects.
+- React
+- TypeScript
+- Vite
+- normal CSS
 
-### Visual Direction
+### Backend
 
-Build a clean developer utility:
+- Node.js
+- TypeScript
+- Express
 
-- desktop-first
-- light mode only for experimental V1
-- neutral background
-- restrained borders
-- high information density
-- normal sans-serif for UI
-- monospace for branches, paths, and SHAs
-- clear status indicators
-- modest corner radii
-- minimal motion
+### Persistence
 
-Avoid:
+- SQLite
 
-- marketing hero sections
-- gradients
-- glassmorphism
-- giant cards
-- fake analytics
-- charts
-- contribution heatmaps
-- coding streaks
-- productivity scores
+### Runtime model
+
+- local web application
+- backend bound only to `127.0.0.1`
+- no XAMPP dependency required
+
+Avoid introducing Redux, Next.js, Electron, Tauri, Docker, or a large framework unless a concrete requirement proves necessary.
 
 ---
 
-## 14. Dashboard
+## 18. Visual direction
 
-Show:
+The visual design should **not copy LogBytes**.
 
-- Tracked Projects
-- Uncommitted Projects
-- Active This Week
-- Commits This Week
+Desired qualities:
 
-Then:
+- personal developer-tool feel,
+- calm and focused,
+- compact but readable,
+- information-dense without clutter,
+- strong project/activity hierarchy,
+- clear state badges,
+- excellent dark mode or a carefully chosen primary theme,
+- responsive desktop-first layout,
+- subtle use of cards/panels where they clarify structure,
+- no giant marketing UI,
+- no glassmorphism-heavy design,
+- no decorative gradients unless restrained,
+- no fake terminal aesthetic everywhere.
 
-- Needs Attention
-- Recent Projects
-- Recent Activity
-
-A repository belongs in Needs Attention when applicable because it is:
-
-- Uncommitted
-- Ahead
-- Behind
-
-Do not invent numerical risk/productivity scores.
-
----
-
-## 15. Projects Screen
-
-Use a dense list/table hybrid.
-
-Show at least:
-
-- project name
-- path
-- branch
-- working-tree state
-- ahead/behind
-- GitHub state
-- last activity
-
-Filters:
-
-- All
-- Uncommitted
-- Ahead
-- Behind
-- GitHub
-- Local Only
-
-Also support text search.
+The app should feel like a useful personal workspace, not a SaaS landing page or enterprise analytics product.
 
 ---
 
-## 16. Project Detail
+## 19. Empty / loading / error states
 
-Header actions:
-
-- Open Folder
-- Open Terminal
-- Open VS Code
-- Open GitHub when available
-- Rescan
-
-Tabs:
-
-- Overview
-- Commits
-- Activity
-
-Overview should show:
-
-- path
-- branch
-- working-tree state
-- modified/staged/untracked counts
-- ahead/behind
-- last scan
-- changed files
-- remotes
-- optional GitHub metadata
-
-Changed files are read-only.
-
-Commits should show at least:
-
-- short SHA
-- subject
-- date/time
-
-About 20 visible entries is enough initially.
-
----
-
-## 17. Activity Screen
-
-Combine events across repositories.
-
-Support:
-
-- project filter
-- basic date range
-
-Show:
-
-- time
-- project
-- event type
-- summary
-
-No charts required.
-
----
-
-## 18. Sources Screen
-
-Manage:
-
-### Scan Locations
-Show:
-
-- path
-- depth
-- last scan
-- repositories discovered
-
-Actions:
-
-- Scan
-- Remove
-- Add Scan Location
-- Rescan All
-
-### Individual Repositories
-Actions:
-
-- Add Individual Repository
-- Rescan
-- Remove from dashboard
-
-Removing from the dashboard must never delete files or repositories from disk.
-
-For V1, text/pasted paths are acceptable. Backend validates them.
-
----
-
-## 19. Settings Screen
-
-Keep minimal.
-
-Show GitHub CLI status:
-
-- Installed / Missing
-- Authenticated / Not Authenticated
-- account name if safely available
-
-Provide Refresh Status.
-
-GitHub remains optional.
-
----
-
-## 20. Consistent User-Facing Status Terms
-
-Working tree:
-
-- `Clean`
-- `Uncommitted`
-
-Sync:
-
-- `Synced`
-- `Ahead N`
-- `Behind N`
-- `Ahead N · Behind N`
-- `No upstream`
-
-GitHub:
-
-- `GitHub Connected`
-- `Local Only`
-- `GitHub Unavailable`
-
----
-
-## 21. Empty States
-
-Handle zero-data states cleanly.
+Every major page must have real empty/loading/error states.
 
 Examples:
 
-- `No projects tracked yet.`
-- `No activity recorded yet.`
-- `No projects need attention.`
-- `No projects match your search.`
-- `GitHub enrichment is unavailable. Local repository tracking continues normally.`
-
-Do not ship fake demo data.
+- Dashboard: “No repositories tracked yet.” → Add a source
+- Projects: “No projects discovered yet.”
+- Contributions: “No development activity recorded yet.”
+- Portfolio: “No projects selected for your portfolio.”
+- GitHub unavailable: local data remains usable; optional enrichment failure must not block the page.
 
 ---
 
-## 22. Acceptance Criteria
+## 20. Security and privacy
 
-The MVP is not complete unless all core behaviors below work.
+### 20.1 Local binding
 
-### Startup
-A fresh clone can:
+Bind backend to `127.0.0.1`, not all interfaces by default.
 
-1. `npm install`
-2. run one documented development command
-3. load the dashboard
-4. reach the health endpoint
+### 20.2 Process execution
 
-SQLite initializes automatically.
+Use `execFile` / `spawn` with argument arrays. Never concatenate untrusted paths into shell command strings.
 
-### Multiple Sources
-At least two independent source locations can be saved, scanned, and persisted.
+### 20.3 Launcher safety
 
-### Scanner
-Must:
+Launcher endpoints accept only registered repository/project IDs. The backend resolves the trusted path.
 
-- discover Git repositories
-- respect depth
-- skip excluded directories
-- survive inaccessible directories
-- avoid duplicates
+No arbitrary path launch endpoint. No arbitrary command execution endpoint.
 
-### Manual Repository Addition
-- valid Git repo → accepted
-- already tracked repo → clear duplicate response
-- normal folder → `NOT_GIT_REPOSITORY`
-- missing path → `PATH_NOT_FOUND`
+### 20.4 Repository privacy
 
-Never initialize Git automatically.
+Do not store repository source code, full diffs, secrets, or terminal history. Store only metadata needed for the product.
 
-### Branch Tracking
-If the branch changes externally and the repo is rescanned, the dashboard must reflect the new branch.
+### 20.5 GitHub secrets
 
-### Working Tree
-Must accurately distinguish clean/uncommitted and count modified, staged, and untracked files.
-
-### Changed Files
-Must be visible read-only.
-
-### Commits
-Recent commits display correctly and repeated rescans do not duplicate stored commits.
-
-### Remote Parsing
-HTTPS and SSH GitHub remotes normalize correctly. Non-GitHub remotes are not misclassified.
-
-### Ahead/Behind
-Display locally known upstream state without running `git fetch`.
-
-### GitHub Optionality
-Missing/unauthenticated/failing `gh` must not break local functionality.
-
-### Dashboard
-Statistics come from real data, not hardcoded placeholders.
-
-### Activity
-At minimum support meaningful events for:
-
-- repository discovered
-- commit
-- clean → dirty
-- dirty → clean
-- branch change
-
-Repeated unchanged rescans must not spam duplicate events.
-
-### Persistence
-Sources, repositories, commits, activity, and relevant cached data survive restart.
-
-### Safety
-Removing a source/repository from the dashboard never deletes files from disk.
-
-Scanning must not change:
-
-- branch
-- working tree
-- staging area
-- history
-- remotes
+Do not persist GitHub PATs in the application database. Use existing authenticated tooling where available.
 
 ---
 
-## 23. Automated Testing Expectations
+## 21. Explicitly out of scope for V1
 
-Prioritize useful logic tests rather than large quantities of superficial UI snapshots.
+Do not add:
 
-At minimum test:
+- user accounts,
+- teams,
+- organizations,
+- collaboration,
+- cloud sync,
+- SaaS backend,
+- mobile native app,
+- client proof packs,
+- corporate reporting,
+- resume builder,
+- professional experience builder,
+- public social network,
+- hosted portfolio publishing,
+- GitHub issue / PR management,
+- task board,
+- kanban,
+- project ticketing,
+- exact coding-time tracking,
+- productivity scores,
+- employee monitoring,
+- AI summaries,
+- AI chatbot,
+- code editor,
+- terminal emulator,
+- repository mutation,
+- automatic Git fetch/pull/push,
+- notifications,
+- background filesystem watcher in V1.
 
-### Windows Path Normalization / Deduplication
-Equivalent path forms must resolve to one repository.
-
-### GitHub Remote Parsing
-Test:
-
-- HTTPS GitHub
-- SSH GitHub
-- non-GitHub
-- malformed remote
-
-### Activity Transitions
-Test:
-
-- clean → dirty
-- dirty → dirty
-- dirty → clean
-- branch A → B
-- duplicate commit
-
-### Git Output Parsing
-Known command output should produce correct structured state.
-
-### Validation
-Test:
-
-- missing path
-- non-Git repository
-- duplicate source/repository
-- unknown repository ID
-
-Aim for a compact but meaningful suite.
+Manual rescan is sufficient for V1.
 
 ---
 
-## 24. Manual Disposable Test Repository
+## 22. V1 acceptance criteria
 
-Do not use an important project as the first behavioral test fixture.
+### 22.1 Startup / persistence
 
-Create/document a disposable repository and manually test:
+- Fresh install works from documented steps.
+- SQLite schema initializes/migrates correctly.
+- App data survives restart.
+- Backend binds only to `127.0.0.1`.
 
-- clean
-- modify tracked file
-- create untracked file
-- stage externally
-- commit externally
-- change branch externally
+### 22.2 Sources / discovery
 
-Verify the dashboard tracks these states without modifying the fixture itself.
+- Multiple scan roots can be added.
+- Scan depth and skip directories work.
+- Discovery stops after a valid worktree.
+- Symlink/junction recursion is safe.
+- Duplicate Windows path variants do not create duplicates.
+- Manually adding a valid Git repo works.
+- Non-Git folders are rejected clearly.
+- Source removal does not delete repositories from disk.
+
+### 22.3 Repository state
+
+- Current branch is correct.
+- Clean/uncommitted state is correct.
+- Staged/modified/untracked counts are correct.
+- Changed files are shown read-only.
+- Upstream state is handled.
+- Ahead/behind uses local tracking refs only.
+- No automatic fetch occurs.
+- Recent commits are bounded and deduplicated.
+
+### 22.4 Manual project tracking
+
+- Status can be changed.
+- Type can be changed.
+- Short project note can be saved.
+- Portfolio inclusion can be toggled.
+- Manual changes produce appropriate activity where specified.
+
+### 22.5 Dashboard
+
+- Summary metrics are real.
+- Recently active projects use meaningful activity.
+- Recent activity is chronological.
+- Needs Attention identifies relevant repository conditions.
+- Contribution preview reflects real activity.
+
+### 22.6 Activity
+
+- Initial scan does not fabricate recent activity from old commits.
+- Old commits keep historical `committed_at`.
+- State transitions use observation time.
+- Unchanged rescans do not duplicate events.
+- Global and project-specific activity views work.
+
+### 22.7 Contributions
+
+- Calendar/heatmap renders from real activity.
+- Local commit activity is visible.
+- GitHub contribution enrichment is optional.
+- Combined mode avoids double-counting same commit SHAs.
+- Daily detail can identify projects/commits.
+- No exact-time claims are made.
+
+### 22.8 Portfolio
+
+- User can select projects for portfolio.
+- Portfolio view reuses tracked project data.
+- GitHub URL works when available.
+- Local-only projects can still appear.
+- Empty state works.
+- No public hosting is required.
+
+### 22.9 GitHub
+
+- HTTPS and SSH remotes normalize correctly.
+- Open GitHub works from parsed remote without requiring `gh`.
+- Missing `gh` does not break local features.
+- GitHub enrichment failure is surfaced non-destructively.
+- No GitHub secrets are stored in app DB.
+
+### 22.10 Launcher safety
+
+- Open Folder works from registered repo ID.
+- Open Terminal works from registered repo ID.
+- Open VS Code works from registered repo ID when available.
+- Open GitHub works for recognized GitHub repos.
+- No arbitrary path or arbitrary command endpoint exists.
+
+### 22.11 Tests
+
+Prioritize automated tests for:
+
+- Windows path normalization,
+- GitHub remote parsing,
+- Git output parsers,
+- repository validation,
+- activity transition derivation,
+- activity deduplication,
+- contribution aggregation,
+- no contribution double-counting,
+- project metadata validation,
+- source removal behavior,
+- safe launcher resolution,
+- API validation.
+
+Use disposable Git repository fixtures where appropriate.
 
 ---
 
-## 25. Explicit V1 Non-Goals
+## 23. Continuation context for the existing Grok implementation
 
-Do not implement:
+This repository already contains a **partial implementation produced by Grok Build**.
 
-- multi-user support
-- app login/authentication
-- cloud backend
-- mobile app
-- team collaboration
-- Jira/Trello features
-- code editor
-- Git client mutation features
-- background filesystem watchers
-- exact coding-time tracking
-- productivity scoring
-- AI summaries
-- AI code review
-- issue management
-- pull request management
-- repository cloning
-- repository creation
-- automatic fetch/pull/push
-- full GitHub-account synchronization
-- multi-repository project grouping
-- notifications
-- Electron
-- Tauri
-- SaaS/deployment infrastructure
-- complex charting
-- dark mode unless all required work is complete with substantial budget remaining
+The original Grok-only endpoint is preserved in Git history at:
+
+- commit: `9711ebb`
+- checkpoint message: `checkpoint: preserve partial Grok implementation after free limit`
+
+Treat that checkpoint as historical evidence and do not rewrite history.
+
+The partial implementation includes backend/shared infrastructure such as SQLite setup/migrations, Git process execution, Git parsers, Git service, activity service, and shared path/GitHub/status utilities.
+
+The previous run did **not** complete the app. Known state at the checkpoint included:
+
+- no completed frontend,
+- no test suite,
+- build could not run because the client was absent,
+- TypeScript config required correction,
+- implementation had progressed beyond clean milestone boundaries.
 
 ---
 
-## 26. Implementation Discipline
+## 24. Required continuation workflow for the next coding agent
 
-This project has limited Grok usage.
+Before modifying code:
 
-Optimize for finishing the MVP correctly and efficiently.
+1. Read this revised `PROJECT_SPEC.md` completely.
+2. Inspect the full repository and Git history.
+3. Inspect the existing partial Grok implementation.
+4. Determine which existing code is reusable as-is, reusable with fixes, obsolete under the revised direction, or missing.
+5. Do **not** restart the project from scratch unless the audit proves a component is unsalvageable.
+6. Produce a continuation plan before implementation.
+7. Map every proposed milestone to this revised specification.
+8. Identify migrations required from the old data model/code to the revised product model.
+9. Preserve the read-only Git safety model.
+10. Wait for explicit approval before implementation.
 
-Avoid:
-
-- unnecessary dependencies
-- speculative abstractions
-- repeated framework changes
-- rewriting stable code for style alone
-- implementing future features
-- repeatedly retrying the same failed strategy without reassessment
-
-Prefer the simplest implementation satisfying the specification.
-
-Use sensible Git commits at meaningful milestones while developing this dashboard repository.
+The continuation agent should be judged partly on its ability to inherit and improve another agent's unfinished work rather than simply replacing it.
 
 ---
 
-## 27. Definition of Done
+## 25. Definition of done
 
-V1 is successful when:
+V1 is done only when:
 
-> A Windows user can start the application, register multiple project locations and individual Git repositories, safely scan them, view accurate read-only Git state and recent activity, optionally enrich GitHub-connected repositories through `gh`, inspect repository details, and launch useful local actions without the dashboard modifying Git or project source files.
-
-Correctness, safety, clarity, and specification adherence matter more than production polish.
+1. The app discovers and tracks multiple real local Git repositories.
+2. Dashboard accurately reflects current/recent personal development activity.
+3. Projects can be lightly categorized and annotated.
+4. Project Detail accurately exposes Git state and recent history without mutating repos.
+5. Global Activity works without duplicate scan noise.
+6. Contributions visualize real development activity and avoid obvious double-counting.
+7. GitHub enrichment is useful but optional.
+8. Portfolio presents selected projects using existing tracked data.
+9. Sources and manual repository management are safe and understandable.
+10. Launcher actions are constrained to registered repositories.
+11. Local repository files are never mutated by the application.
+12. Tests cover critical parsing, activity, contributions, validation, and safety behavior.
+13. Production build passes.
+14. Type checking passes.
+15. Test suite passes.
+16. Live manual acceptance confirms the main workflows.
+17. README documents installation, startup, data location, limitations, and privacy behavior.
+18. Git working tree is clean at the final accepted checkpoint.
 
 ---
 
-## 28. Immediate Task — Planning Only
+## 26. Product identity summary
 
-**Do not implement application code yet.**
+Personal Dev Hub is not a corporate developer analytics platform.
 
-First:
+It is not a Git client.
 
-1. Read this specification completely.
-2. Inspect the current repository and development environment.
-3. Confirm what currently exists in the repository.
-4. Check relevant prerequisites such as Node, npm, Git, and optionally `gh`.
-5. Identify any genuine technical contradictions or blockers.
-6. Propose the simplest folder structure and implementation architecture satisfying the specification.
-7. Propose the SQLite schema and migration approach.
-8. Map the services and API routes.
-9. Break implementation into small milestones.
-10. For each milestone, specify:
-    - what will be built
-    - how it will be tested
-    - what constitutes completion
-11. Identify the highest-risk areas.
-12. Explicitly list tempting features that will **not** be implemented because they are outside V1.
+It is not a project-management suite.
 
-Remain in Plan mode.
+It is not a portfolio builder with repository features attached.
 
-End with a concise implementation plan ready for owner approval.
+It is:
+
+> **A personal developer workspace that combines local repositories, GitHub activity, lightweight project tracking, development history, and selected portfolio work into one simple local-first application.**
+
+The central question the product should always answer is:
+
+> **What have I been building, what am I working on now, and how has my development work evolved over time?**
