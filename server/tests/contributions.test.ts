@@ -28,7 +28,9 @@ afterEach(() => {
 });
 
 async function git(cwd: string, args: string[]): Promise<void> {
-  const result = await runExecFile(resolveGitPath(), args, { cwd, timeout: 20_000 });
+  const executable = resolveGitPath();
+  if (!executable) throw new Error("Git is not available for tests.");
+  const result = await runExecFile(executable, args, { cwd, timeout: 20_000 });
   if (result.code !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
 }
 
