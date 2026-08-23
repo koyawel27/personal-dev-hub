@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ActivityEventDto,
   CommitDto,
@@ -8,7 +9,11 @@ import type {
   RepositoryListItem,
   ScanSummary,
   SnapshotDto,
+  ProjectStatus,
+  ProjectType,
+  UpdateMetadataRequest,
 } from "../../../shared/api-types.js";
+import { PROJECT_STATUSES, PROJECT_TYPES } from "../../../shared/api-types.js";
 import { parseGitHubRemote } from "../../../shared/github-remote.js";
 import {
   pathIdentity,
@@ -46,6 +51,11 @@ type RepoRow = {
   discovery_type: "scanned" | "manual";
   created_at: string;
   last_scanned_at: string | null;
+  project_status: ProjectStatus | null;
+  project_type: ProjectType | null;
+  project_note: string | null;
+  include_in_portfolio: number;
+  portfolio_order: number | null;
 };
 
 type SnapshotRow = {
@@ -171,6 +181,11 @@ function toListItem(row: RepoRow): RepositoryListItem {
     sourceId: row.source_id,
     lastScannedAt: row.last_scanned_at,
     snapshot: snapshotDto(snap),
+    projectStatus: row.project_status,
+    projectType: row.project_type,
+    projectNote: row.project_note,
+    includeInPortfolio: row.include_in_portfolio === 1,
+    portfolioOrder: row.portfolio_order,
     workingTree: workingTreeTerm(snap ? snap.is_dirty === 1 : false),
     sync: syncTerm(
       snap?.upstream_ref,
@@ -187,7 +202,7 @@ function toListItem(row: RepoRow): RepositoryListItem {
 function getRepoRow(id: number): RepoRow {
   const row = getDb()
     .prepare(
-      `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at
+      `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
        FROM local_repositories WHERE id = ?`,
     )
     .get(id) as RepoRow | undefined;
@@ -205,7 +220,7 @@ function findRepoByIdentity(identity: string): RepoRow | null {
   return (
     (getDb()
       .prepare(
-        `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at
+        `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
          FROM local_repositories WHERE canonical_path = ?`,
       )
       .get(identity) as RepoRow | undefined) ?? null
@@ -441,7 +456,7 @@ function upsertDiscoveredRepo(
 export function listRepositories(): RepositoryListItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at
+      `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
        FROM local_repositories
        ORDER BY name COLLATE NOCASE ASC, id ASC`,
     )
@@ -585,6 +600,172 @@ export async function addManualRepository(input: { path: unknown }): Promise<Rep
 export function deleteRepository(id: number): void {
   getRepoRow(id);
   getDb().prepare("DELETE FROM local_repositories WHERE id = ?").run(id);
+}
+
+const METADATA_ERROR =
+  "Metadata is invalid. Provide valid projectStatus/projectType values, a note of at most 500 characters, and a boolean portfolio flag.";
+
+function metadataError(): AppError {
+  return new AppError(ErrorCodes.INVALID_METADATA, METADATA_ERROR);
+}
+
+type MetadataChange = {
+  eventType: "project_status_changed" | "project_note_updated";
+  summary: string;
+  fingerprint: string;
+  metadata: Record<string, unknown>;
+};
+
+export async function updateMetadata(
+  id: number,
+  input: unknown,
+): Promise<RepositoryDetail> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw metadataError();
+  }
+  const body = input as Record<string, unknown>;
+  const keys = Object.keys(body);
+  const allowed = [
+    "projectStatus",
+    "projectType",
+    "projectNote",
+    "includeInPortfolio",
+    "portfolioOrder",
+  ];
+  if (keys.some((key) => !allowed.includes(key))) {
+    throw metadataError();
+  }
+
+  // Validate everything before touching the database or emitting events.
+  let nextStatus: ProjectStatus | null | undefined;
+  if (body.projectStatus !== undefined) {
+    if (body.projectStatus === null) {
+      nextStatus = null;
+    } else if (
+      typeof body.projectStatus === "string" &&
+      (PROJECT_STATUSES as readonly string[]).includes(body.projectStatus)
+    ) {
+      nextStatus = body.projectStatus as ProjectStatus;
+    } else {
+      throw metadataError();
+    }
+  }
+
+  let nextType: ProjectType | null | undefined;
+  if (body.projectType !== undefined) {
+    if (body.projectType === null) {
+      nextType = null;
+    } else if (
+      typeof body.projectType === "string" &&
+      (PROJECT_TYPES as readonly string[]).includes(body.projectType)
+    ) {
+      nextType = body.projectType as ProjectType;
+    } else {
+      throw metadataError();
+    }
+  }
+
+  let nextNote: string | null | undefined;
+  if (body.projectNote !== undefined) {
+    if (body.projectNote === null) {
+      nextNote = null;
+    } else if (typeof body.projectNote === "string") {
+      const trimmed = body.projectNote.trim();
+      if (trimmed.length > 500) throw metadataError();
+      nextNote = trimmed.length > 0 ? trimmed : null;
+    } else {
+      throw metadataError();
+    }
+  }
+
+  let nextInclude: boolean | undefined;
+  if (body.includeInPortfolio !== undefined) {
+    if (typeof body.includeInPortfolio === "boolean") {
+      nextInclude = body.includeInPortfolio;
+    } else {
+      throw metadataError();
+    }
+  }
+
+  let nextOrder: number | null | undefined;
+  if (body.portfolioOrder !== undefined) {
+    if (body.portfolioOrder === null) {
+      nextOrder = null;
+    } else if (
+      typeof body.portfolioOrder === "number" &&
+      Number.isInteger(body.portfolioOrder)
+    ) {
+      nextOrder = body.portfolioOrder;
+    } else {
+      throw metadataError();
+    }
+  }
+
+  return withScanLock(async () => {
+    const repo = getRepoRow(id);
+    const changes: MetadataChange[] = [];
+    const observedAt = nowIso();
+
+    if (nextStatus !== undefined && nextStatus !== repo.project_status) {
+      changes.push({
+        eventType: "project_status_changed",
+        summary: `Project status changed from ${repo.project_status ?? "—"} to ${nextStatus ?? "—"}`,
+        fingerprint: `${repo.id}:project_status_changed:${repo.project_status ?? "none"}->${nextStatus ?? "none"}`,
+        metadata: { from: repo.project_status, to: nextStatus },
+      });
+    }
+
+    if (nextNote !== undefined && nextNote !== repo.project_note) {
+      const digest = createHash("sha256").update(nextNote ?? "").digest("hex").slice(0, 12);
+      changes.push({
+        eventType: "project_note_updated",
+        summary: `Project note updated${nextNote ? `: ${nextNote}` : ""}`,
+        fingerprint: `${repo.id}:project_note_updated:${digest}`,
+        metadata: { length: (nextNote ?? "").length },
+      });
+    }
+
+    withTransaction(() => {
+      const db = getDb();
+
+      if (changes.length > 0) {
+        persistActivityEvents(
+          repo.id,
+          changes.map((change) => ({
+            eventType: change.eventType,
+            summary: change.summary,
+            occurredAt: observedAt,
+            fingerprint: change.fingerprint,
+            metadata: change.metadata,
+          })),
+        );
+      }
+
+      db.prepare(
+        `UPDATE local_repositories SET
+           project_status = CASE WHEN ?1 THEN ?2 ELSE project_status END,
+           project_type   = CASE WHEN ?3 THEN ?4 ELSE project_type END,
+           project_note   = CASE WHEN ?5 THEN ?6 ELSE project_note END,
+           include_in_portfolio = CASE WHEN ?7 THEN ?8 ELSE include_in_portfolio END,
+           portfolio_order = CASE WHEN ?9 THEN ?10 ELSE portfolio_order END
+         WHERE id = ?11`,
+      ).run(
+        nextStatus !== undefined ? 1 : 0,
+        nextStatus ?? null,
+        nextType !== undefined ? 1 : 0,
+        nextType ?? null,
+        nextNote !== undefined ? 1 : 0,
+        nextNote ?? null,
+        nextInclude !== undefined ? 1 : 0,
+        nextInclude === true ? 1 : 0,
+        nextOrder !== undefined ? 1 : 0,
+        nextOrder ?? null,
+        repo.id,
+      );
+    });
+
+    return getRepositoryDetail(id);
+  });
 }
 
 export async function refreshRepository(id: number): Promise<RepositoryDetail> {

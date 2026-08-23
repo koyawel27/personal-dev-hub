@@ -51,7 +51,7 @@ export function deriveActivityEvents(input: {
     if (knownCommitShas.has(commit.sha)) continue;
     const occurredAt = commit.committedAt || observedAt;
     events.push({
-      eventType: "commit",
+      eventType: "commit_observed",
       summary: commit.subject,
       occurredAt,
       fingerprint: `${repositoryId}:commit:${commit.sha}`,

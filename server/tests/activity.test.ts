@@ -150,7 +150,7 @@ describe("Activity transitions", () => {
       knownCommitShas: new Set(["abc"]),
       observedAt: "2026-08-21T01:00:00.000Z",
     });
-    expect(events.map((event) => event.eventType)).toEqual(["commit"]);
+    expect(events.map((event) => event.eventType)).toEqual(["commit_observed"]);
     expect(events[0]?.fingerprint).toBe("1:commit:def");
   });
 });

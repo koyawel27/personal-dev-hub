@@ -43,7 +43,7 @@ export function githubTerm(hasGitHubRemote: boolean): GitHubTerm {
 }
 
 export const QUALIFYING_ACTIVITY_TYPES = [
-  "commit",
+  "commit_observed",
   "working_tree_dirty",
   "working_tree_clean",
   "branch_changed",

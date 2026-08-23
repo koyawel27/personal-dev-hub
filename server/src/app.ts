@@ -21,6 +21,7 @@ import {
   refreshRepository,
   scanAllSources,
   scanSource,
+  updateMetadata,
 } from "./services/RepositoryService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
 
@@ -133,6 +134,18 @@ export function createApp(): express.Express {
     try {
       const repository = await refreshRepository(
         requireId(req.params.id, "repository"),
+      );
+      res.json({ repository });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.patch("/api/repositories/:id/metadata", async (req, res, next) => {
+    try {
+      const repository = await updateMetadata(
+        requireId(req.params.id, "repository"),
+        req.body,
       );
       res.json({ repository });
     } catch (err) {

@@ -2,9 +2,39 @@ import type { GitHubTerm } from "./status-terms.js";
 
 export type DiscoveryType = "scanned" | "manual";
 
+export const PROJECT_STATUSES = [
+  "Active",
+  "Paused",
+  "Finished",
+  "Archived",
+  "Experiment",
+] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export const PROJECT_TYPES = [
+  "Personal",
+  "School",
+  "OJT",
+  "Client",
+  "Experiment",
+  "Other",
+] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number];
+
+/** Partial update payload for manual project metadata. */
+export type UpdateMetadataRequest = {
+  projectStatus?: ProjectStatus | null;
+  projectType?: ProjectType | null;
+  projectNote?: string | null;
+  includeInPortfolio?: boolean;
+  portfolioOrder?: number | null;
+};
+
 export type EventType =
   | "repository_discovered"
-  | "commit"
+  | "commit_observed"
+  | "project_status_changed"
+  | "project_note_updated"
   | "working_tree_dirty"
   | "working_tree_clean"
   | "branch_changed"
@@ -92,6 +122,11 @@ export type RepositoryListItem = {
   sourceId: number | null;
   lastScannedAt: string | null;
   snapshot: SnapshotDto | null;
+  projectStatus: ProjectStatus | null;
+  projectType: ProjectType | null;
+  projectNote: string | null;
+  includeInPortfolio: boolean;
+  portfolioOrder: number | null;
   workingTree: "Clean" | "Uncommitted";
   sync: string;
   github: GitHubTerm;

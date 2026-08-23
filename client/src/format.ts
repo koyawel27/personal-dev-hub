@@ -14,7 +14,7 @@ export function eventLabel(eventType: string): string {
   switch (eventType) {
     case "repository_discovered":
       return "Discovered";
-    case "commit":
+    case "commit_observed":
       return "Commit";
     case "working_tree_dirty":
       return "Uncommitted";
