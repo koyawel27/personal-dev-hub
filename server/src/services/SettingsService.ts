@@ -1,4 +1,4 @@
-import { getDb } from "../db/client.js";
+import { getDb, nowIso } from "../db/client.js";
 import { AppError, ErrorCodes } from "../lib/errors.js";
 import { MAX_SCAN_DEPTH } from "../lib/fsPaths.js";
 
@@ -34,9 +34,10 @@ export function setDefaultScanDepth(value: unknown): number {
   }
   getDb()
     .prepare(
-      `INSERT INTO app_settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                                     updated_at = excluded.updated_at`,
     )
-    .run(DEFAULT_SCAN_DEPTH_KEY, String(parsed));
+    .run(DEFAULT_SCAN_DEPTH_KEY, String(parsed), nowIso());
   return parsed;
 }
