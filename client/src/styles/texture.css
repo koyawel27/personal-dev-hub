@@ -1,6 +1,7 @@
 /*
- * Near-invisible pixel/grid texture for SELECTED background areas only.
- * Decorative; never applied where it costs readability.
+ * Atmospheric pixel/grid texture. Visible mainly in uncovered workspace
+ * background; panels sit on solid surfaces above it so dense reading
+ * content never fights the pattern. Roughly half the previous strength.
  */
 
 body {
@@ -8,23 +9,29 @@ body {
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-size: var(--grid-size) var(--grid-size);
   background-attachment: fixed;
 }
 
-/* Empty states carry a faint stepped-square mark (see EmptyState.tsx). */
-.empty-state {
+/* Compact empty-state mark: a small stepped pixel cluster, not a big box. */
+.empty-mark {
+  display: inline-flex;
+  width: 18px;
+  height: 10px;
   position: relative;
+  flex: none;
 }
 
-.empty-state::before {
+.empty-mark::before {
   content: "";
-  display: block;
-  width: 8px;
-  height: 8px;
-  margin-bottom: 10px;
-  background: var(--accent-soft);
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  height: 6px;
+  align-self: end;
+  background: var(--accent);
+  opacity: 0.75;
   box-shadow:
-    12px 0 0 var(--accent-soft),
-    24px 0 0 var(--border);
+    8px 4px 0 var(--border-strong),
+    12px 0 0 var(--accent-soft);
 }

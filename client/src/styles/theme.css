@@ -5,14 +5,16 @@
  */
 
 :root {
-  /* warm neutrals */
-  --bg: #f3efe6;
+  /* warm neutrals — deeper workbench base so panels read as surfaces */
+  --bg: #ece7da;
   --surface: #faf7f0;
-  --surface-2: #ece7db;
+  --surface-2: #e3ddcd;
+  --surface-3: #d8d1bd;
   --border: #ddd5c4;
   --border-strong: #c9bfa9;
   --text: #2b2620;
   --text-muted: #7a7263;
+  --text-faint: #948b7a;
 
   /* semantic accents — restrained */
   --accent: #a8623a;
@@ -26,13 +28,14 @@
   --danger-bg: #f6e4e1;
 
   /* shape & depth */
-  --radius-s: 4px;
-  --radius-m: 8px;
-  --shadow-offset: 2px 2px 0 rgba(43, 38, 32, 0.1);
-  --shadow-offset-press: 1px 1px 0 rgba(43, 38, 32, 0.08);
+  --radius-s: 3px;
+  --radius-m: 6px;
+  --shadow-offset: 2px 2px 0 rgba(43, 38, 32, 0.12);
+  --shadow-offset-press: 1px 1px 0 rgba(43, 38, 32, 0.1);
 
-  /* pixel/grid texture line (near-invisible by design) */
-  --grid-line: rgba(43, 38, 32, 0.045);
+  /* atmospheric texture (kept faint; see texture.css) */
+  --grid-line: rgba(43, 38, 32, 0.022);
+  --grid-size: 20px;
 
   /* typography roles — sans for UI, mono for technical metadata only */
   --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
