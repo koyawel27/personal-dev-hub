@@ -138,7 +138,7 @@ describe("Manual metadata activity events", () => {
     let statusEvents = eventsOfType(res, "project_status_changed");
     expect(statusEvents).toHaveLength(1);
     expect(statusEvents[0].summary).toContain("Paused");
-    expect(activityHasFingerprint(`fingerprint LIKE '${repoId}:project_status_changed:none->Paused'`)).toBe(true);
+    expect(activityHasFingerprint(`fingerprint LIKE 'p%:${repoId}:project_status_changed:none->Paused'`)).toBe(true);
     expect(await activityCount()).toBe(before + 1);
 
     // A different value produces exactly one more event.
@@ -148,7 +148,7 @@ describe("Manual metadata activity events", () => {
     expect(statusEvents).toHaveLength(2);
     expect(
       activityHasFingerprint(
-        `fingerprint LIKE '${repoId}:project_status_changed:Paused->Finished'`,
+        `fingerprint LIKE 'p%:${repoId}:project_status_changed:Paused->Finished'`,
       ),
     ).toBe(true);
 

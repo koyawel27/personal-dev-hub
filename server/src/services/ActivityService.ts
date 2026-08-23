@@ -137,18 +137,29 @@ export function persistActivityEvents(
 ): void {
   if (events.length === 0) return;
   const db = getDb();
+  // Since 004/006, events are project-owned and fingerprints are
+  // project-scoped: "p{projectId}:{legacyRepoScopedFingerprint}".
+  const row = db
+    .prepare("SELECT project_id FROM local_repositories WHERE id = ?")
+    .get(repositoryId) as { project_id: number | null } | undefined;
+  const projectId = row?.project_id;
+  if (projectId == null) {
+    throw new Error(`Repository ${repositoryId} has no project mapping.`);
+  }
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO activity_events
-      (local_repository_id, event_type, summary, occurred_at, source, fingerprint, metadata_json)
-     VALUES (?, ?, ?, ?, 'scan', ?, ?)`,
+      (project_id, local_repository_id, event_type, summary, occurred_at, source, fingerprint, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const event of events) {
     stmt.run(
+      projectId,
       repositoryId,
       event.eventType,
       event.summary,
       event.occurredAt,
-      event.fingerprint,
+      "scan",
+      `p${projectId}:${event.fingerprint}`,
       JSON.stringify(event.metadata),
     );
   }

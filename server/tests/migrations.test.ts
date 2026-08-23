@@ -82,6 +82,7 @@ const EXPECTED_MIGRATIONS = [
   "003_app_settings",
   "004_projects_core",
   "005_github_bindings",
+  "006_project_activity",
 ];
 
 describe("Ordered migrations", () => {
@@ -138,7 +139,9 @@ describe("Ordered migrations", () => {
     expect(rows.map((row) => row.name)).toEqual(EXPECTED_MIGRATIONS);
 
     const events = db
-      .prepare("SELECT event_type FROM activity_events WHERE fingerprint = '1:commit:abc123'")
+      .prepare(
+        "SELECT event_type FROM activity_events WHERE fingerprint LIKE 'p%:1:commit:abc123'",
+      )
       .all() as { event_type: string }[];
     expect(events).toHaveLength(1);
     expect(events[0].event_type).toBe("commit_observed");

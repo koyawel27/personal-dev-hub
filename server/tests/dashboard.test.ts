@@ -50,8 +50,9 @@ describe("Dashboard aggregation", () => {
     const db = getDb();
     const insert = db.prepare(
       `INSERT INTO activity_events
-        (local_repository_id, event_type, summary, occurred_at, source, fingerprint)
-       VALUES (1, ?, 'subject', ?, 'scan', ?)`,
+        (project_id, local_repository_id, event_type, summary, occurred_at, source, fingerprint)
+       VALUES ((SELECT project_id FROM local_repositories WHERE id = 1),
+               1, ?, 'subject', ?, 'scan', ?)`,
     );
     // Two qualifying events on the same day count as ONE active day;
     // a third qualifying day brings the total to three.
@@ -73,8 +74,9 @@ describe("Dashboard aggregation", () => {
     const futureIso = "2027-01-01T00:00:00.000Z";
     db.prepare(
       `INSERT INTO activity_events
-        (local_repository_id, event_type, summary, occurred_at, source, fingerprint)
-       VALUES (1, 'commit_observed', 'real work', ?, 'scan', 'f-real')`,
+        (project_id, local_repository_id, event_type, summary, occurred_at, source, fingerprint)
+       VALUES ((SELECT project_id FROM local_repositories WHERE id = 1),
+               1, 'commit_observed', 'real work', ?, 'scan', 'f-real')`,
     ).run(futureIso);
 
     const res = await request(app).get("/api/dashboard");

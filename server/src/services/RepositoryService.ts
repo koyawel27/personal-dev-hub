@@ -453,13 +453,33 @@ function upsertDiscoveredRepo(
 
   const createdAt = nowIso();
   const name = repositoryNameFromPath(readablePath);
-  const result = getDb()
+  const db = getDb();
+
+  // Every binding must belong to a project (004 invariant). A brand-new
+  // local repository starts as its own project; the V1.1 matching engine
+  // (GC milestone) will later link bindings that share GitHub identity.
+  const projectResult = db
+    .prepare(
+      `INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)`,
+    )
+    .run(name, createdAt, createdAt);
+  const projectId = Number(projectResult.lastInsertRowid);
+
+  const result = db
     .prepare(
       `INSERT INTO local_repositories
-        (source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+        (source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
     )
-    .run(sourceId, name, readablePath, identity, discoveryType, createdAt);
+    .run(
+      sourceId,
+      projectId,
+      name,
+      readablePath,
+      identity,
+      discoveryType,
+      createdAt,
+    );
 
   return { repo: getRepoRow(Number(result.lastInsertRowid)), isNew: true };
 }
