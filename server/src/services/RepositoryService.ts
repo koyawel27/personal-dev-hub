@@ -168,10 +168,17 @@ function lastActivity(repoId: number): { at: string; summary: string } | null {
   return row ? { at: row.occurred_at, summary: row.summary } : null;
 }
 
-function toListItem(row: RepoRow): RepositoryListItem {
-  const snap = latestSnapshot(row.id);
-  const activity = lastActivity(row.id);
-  const githubUrl = githubHtmlUrlForRepo(row.id);
+function toListItem(
+  row: RepoRow,
+  ctx: {
+    snap: SnapshotRow | null;
+    activity: { at: string; summary: string } | null;
+    githubUrl: string | null;
+  },
+): RepositoryListItem {
+  const snap = ctx.snap;
+  const activity = ctx.activity;
+  const githubUrl = ctx.githubUrl;
   return {
     id: row.id,
     name: row.name,
@@ -461,7 +468,90 @@ export function listRepositories(): RepositoryListItem[] {
        ORDER BY name COLLATE NOCASE ASC, id ASC`,
     )
     .all() as RepoRow[];
-  return rows.map(toListItem);
+  const context = buildListItemContext(rows.map((row) => row.id));
+  return rows.map((row) =>
+    toListItem(
+      row,
+      context.get(row.id) ?? { snap: null, activity: null, githubUrl: null },
+    ),
+  );
+}
+
+/**
+ * Batched variant for list-heavy endpoints (Projects page, Dashboard):
+ * one grouped query per data family instead of three queries per row,
+ * keeping large workspaces (100+ repositories) responsive.
+ */
+function buildListItemContext(
+  repoIds: number[],
+): Map<number, { snap: SnapshotRow | null; activity: { at: string; summary: string } | null; githubUrl: string | null }> {
+  const db = getDb();
+  const ctx = new Map<
+    number,
+    { snap: SnapshotRow | null; activity: { at: string; summary: string } | null; githubUrl: string | null }
+  >();
+  if (repoIds.length === 0) return ctx;
+
+  // Latest snapshot per repository (correlated MAX(id) — snapshot ids are monotonic).
+  const snaps = db
+    .prepare(
+      `SELECT s.local_repository_id AS rid, s.branch, s.head_commit_sha, s.is_dirty,
+              s.modified_count, s.staged_count, s.untracked_count, s.upstream_ref,
+              s.ahead_count, s.behind_count, s.captured_at
+       FROM repository_snapshots s
+       JOIN (
+         SELECT local_repository_id, MAX(id) AS max_id
+         FROM repository_snapshots
+         WHERE local_repository_id IN (${repoIds.map(() => "?").join(",")})
+         GROUP BY local_repository_id
+       ) latest ON latest.max_id = s.id`,
+    )
+    .all(...repoIds) as (SnapshotRow & { rid: number })[];
+  for (const snap of snaps) {
+    ctx.set(snap.rid, {
+      snap: (({ rid: _rid, ...rest }) => rest)(snap) as SnapshotRow,
+      activity: null,
+      githubUrl: null,
+    });
+  }
+
+  // Latest activity per repository.
+  const activities = db
+    .prepare(
+      `SELECT e.local_repository_id AS rid, e.occurred_at, e.summary
+       FROM activity_events e
+       JOIN (
+         SELECT local_repository_id, MAX(id) AS max_id
+         FROM activity_events
+         WHERE local_repository_id IN (${repoIds.map(() => "?").join(",")})
+         GROUP BY local_repository_id
+       ) latest ON latest.max_id = e.id`,
+    )
+    .all(...repoIds) as { rid: number; occurred_at: string; summary: string }[];
+  for (const activity of activities) {
+    const entry = ctx.get(activity.rid) ?? { snap: null, activity: null, githubUrl: null };
+    entry.activity = { at: activity.occurred_at, summary: activity.summary };
+    ctx.set(activity.rid, entry);
+  }
+
+  // First recognized GitHub URL per repository (primary remote first).
+  const remotes = db
+    .prepare(
+      `SELECT r.local_repository_id AS rid, r.url, g.html_url
+       FROM git_remotes r
+       LEFT JOIN github_repositories g ON g.id = r.github_repository_id
+       WHERE r.local_repository_id IN (${repoIds.map(() => "?").join(",")})
+       ORDER BY r.is_primary DESC, r.name ASC`,
+    )
+    .all(...repoIds) as { rid: number; url: string; html_url: string | null }[];
+  for (const remote of remotes) {
+    const entry = ctx.get(remote.rid) ?? { snap: null, activity: null, githubUrl: null };
+    if (entry.githubUrl == null) {
+      const parsed = parseGitHubRemote(remote.url);
+      entry.githubUrl = remote.html_url ?? parsed?.htmlUrl ?? null;
+    }
+  }
+  return ctx;
 }
 
 function listRemoteRows(repoId: number): RemoteRow[] {
@@ -556,7 +646,12 @@ function githubMetadataForRepo(repoId: number): GitHubMetadataDto | null {
 }
 
 export async function getRepositoryDetail(id: number): Promise<RepositoryDetail> {
-  const item = toListItem(getRepoRow(id));
+  const row = getRepoRow(id);
+  const context = buildListItemContext([row.id]);
+  const item = toListItem(
+    row,
+    context.get(row.id) ?? { snap: null, activity: null, githubUrl: null },
+  );
   let changedFiles: RepositoryDetail["changedFiles"] = [];
   try {
     const inspection = await inspectRepository(item.localPath);

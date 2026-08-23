@@ -8,6 +8,7 @@ import type {
   RepositoryListItem,
   ScanSummary,
   SourceDto,
+  UpdateMetadataRequest,
 } from "@shared/api-types";
 
 export class ApiError extends Error {
@@ -68,6 +69,11 @@ export const client = {
   refresh: (id: number) =>
     api<{ repository: RepositoryDetail }>(`/api/repositories/${id}/refresh`, {
       method: "POST",
+    }),
+  updateMetadata: (id: number, body: UpdateMetadataRequest) =>
+    api<{ repository: RepositoryDetail }>(`/api/repositories/${id}/metadata`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
     }),
   deleteRepository: (id: number) =>
     api<{ ok: true }>(`/api/repositories/${id}`, { method: "DELETE" }),

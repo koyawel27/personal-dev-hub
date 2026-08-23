@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ActivityEventDto, RepositoryDetail } from "@shared/api-types";
 import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
 import { ApiError, client } from "../api";
+import { StatusBadge } from "../components/Badge";
+import { MetadataEditor } from "../components/MetadataEditor";
 import { eventLabel, formatDateTime, shortSha } from "../format";
 
 type Tab = "overview" | "commits" | "activity";
@@ -58,6 +60,15 @@ export function ProjectDetailPage() {
           </p>
           <h1>{repo.name}</h1>
           <p className="lede mono">{repo.localPath}</p>
+          <p className="lede">
+            <StatusBadge status={repo.projectStatus} />
+            {" · "}
+            {repo.projectType ?? "No type"}
+            {" · "}
+            <span className="mono">{repo.snapshot?.branch ?? "—"}</span>
+            {" · "}
+            {repo.workingTree}
+          </p>
         </div>
         <div className="header-actions">
           <button type="button" disabled={busy} onClick={() => run(() => client.open(repo.id, "folder"))}>
@@ -108,6 +119,20 @@ export function ProjectDetailPage() {
 
       {tab === "overview" ? (
         <section className="panel">
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Project metadata
+          </h2>
+          <MetadataEditor
+            repository={repo}
+            onSaved={(updated) => setRepo(updated)}
+            onError={(message) => setError(message)}
+          />
+
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Repository state
+          </h2>
           <div className="detail-grid">
             <div className="muted">Path</div>
             <div className="mono">{repo.localPath}</div>
@@ -133,7 +158,10 @@ export function ProjectDetailPage() {
             <div>{repo.github}</div>
           </div>
 
-          <h2>Changed files</h2>
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Changed files
+          </h2>
           {repo.changedFiles.length === 0 ? (
             <p className="empty">No changed files.</p>
           ) : (
@@ -159,7 +187,10 @@ export function ProjectDetailPage() {
             </table>
           )}
 
-          <h2>Remotes</h2>
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Remotes
+          </h2>
           {repo.remotes.length === 0 ? (
             <p className="empty">No remotes configured.</p>
           ) : (
