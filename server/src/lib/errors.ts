@@ -38,6 +38,23 @@ export function toErrorBody(err: unknown): {
       body: { error: { code: err.code, message: err.message } },
     };
   }
+  // Express JSON body-parser syntax errors are client mistakes, not server faults.
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "type" in err &&
+    (err as { type?: unknown }).type === "entity.parse.failed"
+  ) {
+    return {
+      status: 400,
+      body: {
+        error: {
+          code: ErrorCodes.INVALID_REQUEST,
+          message: "Request body is not valid JSON.",
+        },
+      },
+    };
+  }
   return {
     status: 500,
     body: {

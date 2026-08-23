@@ -29,6 +29,15 @@ describe("API validation and persistence", () => {
     expect(["available", "unavailable"]).toContain(res.body.git);
   });
 
+  it("answers malformed JSON with a 400 validation error, not a 500", async () => {
+    const res = await request(createApp())
+      .post("/api/sources")
+      .set("Content-Type", "application/json")
+      .send('{"path":"C:\\Users\\nope"}'); // invalid JSON escape (\U)
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_REQUEST");
+  });
+
   it("rejects a missing path", async () => {
     const missing = path.join(makeTempDir("ldd-missing-"), "nope");
     cleanup.push(path.dirname(missing));
