@@ -24,6 +24,10 @@ import {
   updateMetadata,
 } from "./services/RepositoryService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
+import {
+  contributionDays,
+  dailyDetail,
+} from "./services/ContributionService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -193,6 +197,24 @@ export function createApp(): express.Express {
       const from = typeof req.query.from === "string" ? req.query.from : undefined;
       const to = typeof req.query.to === "string" ? req.query.to : undefined;
       res.json({ activity: listActivity({ repositoryId, from, to }) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/contributions", (req, res, next) => {
+    try {
+      const from = typeof req.query.from === "string" ? req.query.from : null;
+      const to = typeof req.query.to === "string" ? req.query.to : null;
+      res.json({ days: contributionDays(from, to) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/contributions/:day", (req, res, next) => {
+    try {
+      res.json(dailyDetail(req.params.day));
     } catch (err) {
       next(err);
     }

@@ -30,6 +30,30 @@ export type UpdateMetadataRequest = {
   portfolioOrder?: number | null;
 };
 
+/** One day of contribution activity. Counts are commit counts, never hours. */
+export type ContributionDayDto = {
+  date: string;
+  /** Distinct commit SHAs across all sources (deduplicated combined total). */
+  total: number;
+  /** Portion contributed by local Git observation. */
+  localCount: number;
+  /** Portion contributed by GitHub enrichment only (not already local). */
+  githubCount: number;
+};
+
+export type DailyProjectCommits = {
+  repositoryId: number;
+  projectName: string;
+  commits: CommitDto[];
+};
+
+export type DailyDetailResponse = {
+  date: string;
+  /** Distinct commit SHAs for the day across all projects. */
+  totalCommits: number;
+  projects: DailyProjectCommits[];
+};
+
 export type EventType =
   | "repository_discovered"
   | "commit_observed"

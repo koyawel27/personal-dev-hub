@@ -352,6 +352,91 @@ button:disabled {
   resize: vertical;
 }
 
+/* ---------- contribution calendar ---------- */
+
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.calendar-month {
+  font-weight: 600;
+}
+
+.calendar-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.calendar-legend em {
+  margin-left: 6px;
+  font-style: normal;
+}
+
+.calendar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.calendar-week {
+  display: flex;
+  gap: 3px;
+}
+
+.cell {
+  width: 15px;
+  height: 15px;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+  padding: 0;
+  box-shadow: none;
+}
+
+button.cell:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.cell.blank {
+  background: transparent;
+  border-color: transparent;
+}
+
+.cell.l0 {
+  background: var(--surface-2);
+}
+
+.cell.l1 {
+  background: var(--accent-soft);
+}
+
+.cell.l2 {
+  background: #d9a06f;
+}
+
+.cell.l3 {
+  background: var(--accent);
+}
+
+.cell.selected {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+.day-commits {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
 /* ---------- feedback ---------- */
 
 .empty {

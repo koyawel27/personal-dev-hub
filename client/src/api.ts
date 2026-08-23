@@ -1,6 +1,8 @@
 import type {
   ActivityEventDto,
   ApiErrorBody,
+  ContributionDayDto,
+  DailyDetailResponse,
   DashboardResponse,
   GitHubStatusDto,
   HealthResponse,
@@ -88,4 +90,7 @@ export const client = {
     return api<{ activity: ActivityEventDto[] }>(`/api/activity${q ? `?${q}` : ""}`);
   },
   githubStatus: () => api<{ status: GitHubStatusDto }>("/api/github/status"),
+  contributions: () => api<{ days: ContributionDayDto[] }>("/api/contributions"),
+  contributionDay: (day: string) =>
+    api<DailyDetailResponse>(`/api/contributions/${day}`),
 };
