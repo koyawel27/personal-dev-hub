@@ -35,6 +35,13 @@ export async function runExecFile(
       killed?: boolean;
       message?: string;
     };
+    if (e.code === "ENOENT") {
+      return {
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? e.message ?? "ENOENT",
+        code: 127,
+      };
+    }
     const code = typeof e.code === "number" ? e.code : 1;
     return {
       stdout: e.stdout ?? "",

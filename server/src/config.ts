@@ -5,11 +5,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(here, "..", "..");
 
 export const config = {
-  host: "127.0.0.1",
-  port: Number(process.env.DASHBOARD_PORT) || 8787,
-  dbPath:
-    process.env.DASHBOARD_DB_PATH ||
-    path.join(PROJECT_ROOT, "data", "dashboard.sqlite"),
-  clientDist: path.join(PROJECT_ROOT, "dist", "client"),
+  host: "127.0.0.1" as const,
   gitTimeoutMs: 20_000,
-} as const;
+  clientDist: path.join(PROJECT_ROOT, "dist", "client"),
+  get port(): number {
+    return Number(process.env.DASHBOARD_PORT) || 8787;
+  },
+  get dbPath(): string {
+    return (
+      process.env.DASHBOARD_DB_PATH ||
+      path.join(PROJECT_ROOT, "data", "dashboard.sqlite")
+    );
+  },
+};

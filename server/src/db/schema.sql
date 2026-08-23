@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS project_sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL,
-  canonical_path TEXT NOT NULL UNIQUE,
+  canonical_path TEXT NOT NULL UNIQUE COLLATE NOCASE,
   scan_depth INTEGER NOT NULL DEFAULT 3,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS local_repositories (
   source_id INTEGER NULL REFERENCES project_sources(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   local_path TEXT NOT NULL,
-  canonical_path TEXT NOT NULL UNIQUE,
+  canonical_path TEXT NOT NULL UNIQUE COLLATE NOCASE,
   discovery_type TEXT NOT NULL CHECK (discovery_type IN ('scanned', 'manual')),
   created_at TEXT NOT NULL,
   last_scanned_at TEXT

@@ -55,6 +55,14 @@ export function canonicalizePath(input: string): string {
   return p;
 }
 
+/**
+ * Case-insensitive identity for Windows path uniqueness.
+ * Display paths should use canonicalizePath(); database unique keys use this.
+ */
+export function pathIdentity(input: string): string {
+  return canonicalizePath(input).toLowerCase();
+}
+
 export function repositoryNameFromPath(canonicalPath: string): string {
   const base = WIN32.basename(canonicalPath);
   return base || canonicalPath;

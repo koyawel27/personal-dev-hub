@@ -15,7 +15,7 @@ function cleanRepoName(raw: string): string {
   return raw.replace(/\.git$/i, "").replace(/\/+$/, "");
 }
 
-function isSafeSegment(value: string): boolean {
+export function isSafeSegment(value: string): boolean {
   return /^[A-Za-z0-9_.-]+$/.test(value) && value !== "." && value !== "..";
 }
 

@@ -98,7 +98,12 @@ export async function runGit(
     windowsHide: true,
   });
 
-  if (result.code !== 0 && result.stderr.toLowerCase().includes("not recognized")) {
+  const stderr = result.stderr.toLowerCase();
+  if (
+    result.code === 127 ||
+    stderr.includes("not recognized") ||
+    stderr.includes("enoent")
+  ) {
     throw new AppError(
       ErrorCodes.GIT_UNAVAILABLE,
       "The system Git executable was not found.",

@@ -18,5 +18,11 @@
       "@shared/*": ["shared/*"]
     }
   },
-  "include": ["server/**/*", "shared/**/*", "client/**/*", "vitest.config.ts"]
+  "include": [
+    "server/**/*",
+    "shared/**/*",
+    "client/**/*",
+    "vitest.config.ts"
+  ],
+  "exclude": ["node_modules", "dist", "data"]
 }

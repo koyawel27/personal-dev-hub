@@ -1,4 +1,5 @@
 import type { EventType } from "../../../shared/api-types.js";
+import { getDb } from "../db/client.js";
 import type { GitInspection } from "./GitService.js";
 
 export type PreviousSnapshot = {
@@ -128,4 +129,27 @@ export function deriveActivityEvents(input: {
   }
 
   return events;
+}
+
+export function persistActivityEvents(
+  repositoryId: number,
+  events: DerivedEvent[],
+): void {
+  if (events.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO activity_events
+      (local_repository_id, event_type, summary, occurred_at, source, fingerprint, metadata_json)
+     VALUES (?, ?, ?, ?, 'scan', ?, ?)`,
+  );
+  for (const event of events) {
+    stmt.run(
+      repositoryId,
+      event.eventType,
+      event.summary,
+      event.occurredAt,
+      event.fingerprint,
+      JSON.stringify(event.metadata),
+    );
+  }
 }

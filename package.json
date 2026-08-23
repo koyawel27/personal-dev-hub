@@ -12,6 +12,7 @@
     "dev:web": "vite --config client/vite.config.ts",
     "build": "vite build --config client/vite.config.ts",
     "start": "tsx server/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
