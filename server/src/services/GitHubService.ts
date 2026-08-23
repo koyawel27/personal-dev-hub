@@ -38,11 +38,27 @@ export function resolveGhPath(): string | null {
 async function runGh(
   args: readonly string[],
 ): Promise<{ stdout: string; stderr: string; code: number }> {
+  // Test seam: when an executor is injected it fully replaces process
+  // invocation so suites can script gh behavior without live GitHub.
+  if (ghExecutorOverride) {
+    return ghExecutorOverride(args);
+  }
   const ghPath = resolveGhPath();
   if (!ghPath) {
     return { stdout: "", stderr: "gh not found", code: 127 };
   }
   return runExecFile(ghPath, args, { timeout: 12_000, windowsHide: true });
+}
+
+export type GhExecutor = (
+  args: readonly string[],
+) => Promise<{ stdout: string; stderr: string; code: number }>;
+
+let ghExecutorOverride: GhExecutor | null = null;
+
+/** Test-only injection point for scripted gh behavior. */
+export function setGhExecutorForTests(executor: GhExecutor | null): void {
+  ghExecutorOverride = executor;
 }
 
 export async function getGitHubStatus(): Promise<GitHubStatusDto> {
