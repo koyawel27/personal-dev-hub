@@ -14,10 +14,14 @@ const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * Double-count rule (spec section 9.4): COUNT(DISTINCT commit_sha) makes a
  * commit observed in two repositories count once per day. Grouping uses the
  * recorded offset-local date (first 10 chars of the ISO-with-offset value).
+ *
+ * When GitHub enrichment provides GitHub-ONLY commits (SHAs not known
+ * locally), they are merged in as githubCount without double counting.
  */
 export function contributionDays(
   from: string | null,
   to: string | null,
+  githubOnly: { date: string; count: number }[] = [],
 ): ContributionDayDto[] {
   const clauses: string[] = ["committed_at IS NOT NULL"];
   const params: string[] = [];
@@ -39,12 +43,55 @@ export function contributionDays(
        ORDER BY day ASC`,
     )
     .all(...params) as { day: string; total: number }[];
-  return rows.map((row) => ({
-    date: row.day,
-    total: row.total,
-    localCount: row.total,
-    githubCount: 0,
-  }));
+
+  const days = new Map(
+    rows.map((row) => [
+      row.day,
+      { date: row.day, total: row.total, localCount: row.total, githubCount: 0 },
+    ]),
+  );
+
+  for (const entry of githubOnly) {
+    if (from && entry.date < from.slice(0, 10)) continue;
+    if (to && entry.date > to.slice(0, 10)) continue;
+    const existing = days.get(entry.date);
+    if (existing) {
+      existing.githubCount += entry.count;
+      existing.total += entry.count;
+    } else {
+      days.set(entry.date, {
+        date: entry.date,
+        total: entry.count,
+        localCount: 0,
+        githubCount: entry.count,
+      });
+    }
+  }
+
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Pure deduplication helper: given GitHub per-day SHA lists and the set of
+ * SHAs already observed locally, returns the GitHub-only counts per day.
+ */
+export function mergeGithubOnly(
+  githubDays: { date: string; shas: string[] }[],
+  locallyKnownShas: Set<string>,
+): { date: string; count: number }[] {
+  const counts = new Map<string, number>();
+  let contributed = false;
+  for (const day of githubDays) {
+    for (const sha of day.shas) {
+      if (locallyKnownShas.has(sha)) continue;
+      counts.set(day.date, (counts.get(day.date) ?? 0) + 1);
+      contributed = true;
+    }
+  }
+  if (!contributed) return [];
+  return [...counts.entries()]
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function dailyDetail(day: string): DailyDetailResponse {

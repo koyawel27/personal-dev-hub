@@ -4,7 +4,7 @@ import express from "express";
 import { config } from "./config.js";
 import { AppError, ErrorCodes, toErrorBody } from "./lib/errors.js";
 import { parseNumericId } from "./lib/fsPaths.js";
-import { gitIsAvailable } from "./lib/gitRunner.js";
+import { gitIsAvailable, resolveGitPath } from "./lib/gitRunner.js";
 import { getGitHubStatus } from "./services/GitHubService.js";
 import {
   addSource,
@@ -29,6 +29,11 @@ import {
   dailyDetail,
 } from "./services/ContributionService.js";
 import { listPortfolio } from "./services/PortfolioService.js";
+import { githubOnlyCounts } from "./services/GitHubContributionsService.js";
+import {
+  getDefaultScanDepth,
+  setDefaultScanDepth,
+} from "./services/SettingsService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -203,11 +208,16 @@ export function createApp(): express.Express {
     }
   });
 
-  app.get("/api/contributions", (req, res, next) => {
+  app.get("/api/contributions", async (req, res, next) => {
     try {
       const from = typeof req.query.from === "string" ? req.query.from : null;
       const to = typeof req.query.to === "string" ? req.query.to : null;
-      res.json({ days: contributionDays(from, to) });
+      // Optional enrichment: failure here degrades to Local-only labeling.
+      const githubOnly = await githubOnlyCounts(from, to);
+      res.json({
+        days: contributionDays(from, to, githubOnly ?? []),
+        source: githubOnly ? ("local+github" as const) : ("local" as const),
+      });
     } catch (err) {
       next(err);
     }
@@ -240,6 +250,46 @@ export function createApp(): express.Express {
   app.get("/api/github/status", async (_req, res, next) => {
     try {
       res.json({ status: await getGitHubStatus() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/settings", (_req, res, next) => {
+    try {
+      res.json({
+        settings: {
+          defaultScanDepth: getDefaultScanDepth(),
+          gitExecutable: resolveGitPath(),
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.patch("/api/settings", (req, res, next) => {
+    try {
+      if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body)) {
+        throw new AppError(
+          ErrorCodes.INVALID_REQUEST,
+          "Settings payload must be an object.",
+        );
+      }
+      const body = req.body as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "defaultScanDepth")) {
+        throw new AppError(
+          ErrorCodes.INVALID_REQUEST,
+          "Only defaultScanDepth can be changed.",
+        );
+      }
+      const defaultScanDepth = setDefaultScanDepth(body.defaultScanDepth);
+      res.json({
+        settings: {
+          defaultScanDepth,
+          gitExecutable: resolveGitPath(),
+        },
+      });
     } catch (err) {
       next(err);
     }

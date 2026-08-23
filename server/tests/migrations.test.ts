@@ -76,13 +76,15 @@ function createLegacyDatabase(dbPath: string): void {
   db.close();
 }
 
+const EXPECTED_MIGRATIONS = ["001_initial", "002_project_metadata", "003_app_settings"];
+
 describe("Ordered migrations", () => {
-  it("applies 001 and 002 in order on a fresh database", () => {
+  it("applies 001 through 003 in order on a fresh database", () => {
     const db = getDb();
     const rows = db
       .prepare("SELECT name FROM schema_migrations ORDER BY id ASC")
       .all() as { name: string }[];
-    expect(rows.map((row) => row.name)).toEqual(["001_initial", "002_project_metadata"]);
+    expect(rows.map((row) => row.name)).toEqual(EXPECTED_MIGRATIONS);
 
     const columns = (
       db.prepare("PRAGMA table_info(local_repositories)").all() as {
@@ -98,6 +100,11 @@ describe("Ordered migrations", () => {
     ]) {
       expect(columns).toContain(expected);
     }
+
+    const settingsTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'")
+      .get() as { name: string } | undefined;
+    expect(settingsTable?.name).toBe("app_settings");
   });
 
   it("is a no-op when reopened", () => {
@@ -107,7 +114,7 @@ describe("Ordered migrations", () => {
     const rows = db
       .prepare("SELECT name FROM schema_migrations ORDER BY id ASC")
       .all() as { name: string }[];
-    expect(rows.map((row) => row.name)).toEqual(["001_initial", "002_project_metadata"]);
+    expect(rows.map((row) => row.name)).toEqual(EXPECTED_MIGRATIONS);
   });
 
   it("migrates a legacy database and renames commit events to commit_observed", () => {
@@ -122,7 +129,7 @@ describe("Ordered migrations", () => {
     const rows = db
       .prepare("SELECT name FROM schema_migrations ORDER BY id ASC")
       .all() as { name: string }[];
-    expect(rows.map((row) => row.name)).toEqual(["001_initial", "002_project_metadata"]);
+    expect(rows.map((row) => row.name)).toEqual(EXPECTED_MIGRATIONS);
 
     const events = db
       .prepare("SELECT event_type FROM activity_events WHERE fingerprint = '1:commit:abc123'")

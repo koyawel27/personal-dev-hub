@@ -91,6 +91,13 @@ export const client = {
     return api<{ activity: ActivityEventDto[] }>(`/api/activity${q ? `?${q}` : ""}`);
   },
   githubStatus: () => api<{ status: GitHubStatusDto }>("/api/github/status"),
+  settings: () =>
+    api<{ settings: { defaultScanDepth: number; gitExecutable: string } }>("/api/settings"),
+  updateSettings: (body: { defaultScanDepth?: number }) =>
+    api<{ settings: { defaultScanDepth: number; gitExecutable: string } }>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   contributions: () => api<{ days: ContributionDayDto[] }>("/api/contributions"),
   contributionDay: (day: string) =>
     api<DailyDetailResponse>(`/api/contributions/${day}`),

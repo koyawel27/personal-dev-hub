@@ -17,6 +17,8 @@ export function parseScanDepth(value: unknown, fallback = 3): number {
   return n;
 }
 
+export { MAX_SCAN_DEPTH };
+
 export function resolveExistingDirectory(input: unknown): {
   readable: string;
   identity: string;
