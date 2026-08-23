@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type {
   ActivityEventDto,
   CommitDto,
@@ -12,6 +14,8 @@ import type {
   ProjectStatus,
   ProjectType,
   UpdateMetadataRequest,
+  RecentlyActiveProjectDto,
+  AttentionReason,
 } from "../../../shared/api-types.js";
 import { PROJECT_STATUSES, PROJECT_TYPES } from "../../../shared/api-types.js";
 import { parseGitHubRemote } from "../../../shared/github-remote.js";
@@ -984,49 +988,142 @@ function weekAgoIso(): string {
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function needsAttention(item: RepositoryListItem): boolean {
-  if (item.workingTree === "Uncommitted") return true;
-  const ahead = item.snapshot?.aheadCount ?? 0;
-  const behind = item.snapshot?.behindCount ?? 0;
-  return ahead > 0 || behind > 0;
-}
-
 export function getDashboard(): DashboardResponse {
-  const repos = listRepositories();
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, source_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
+       FROM local_repositories
+       ORDER BY name COLLATE NOCASE ASC, id ASC`,
+    )
+    .all() as RepoRow[];
+  const context = buildListItemContext(rows.map((row) => row.id));
   const since = weekAgoIso();
-  const weekActivity = listActivity({ from: since });
   const qualifying = new Set<string>(QUALIFYING_ACTIVITY_TYPES);
+
+  // --- summary metrics (all real values) ---
+  const weekActivity = listActivity({ from: since });
   const activeIds = new Set(
     weekActivity
       .filter((event) => qualifying.has(event.eventType))
       .map((event) => event.localRepositoryId),
   );
   const commitsThisWeek = (
-    getDb()
+    db
       .prepare(
-        `SELECT COUNT(*) AS n FROM commits
+        `SELECT COUNT(DISTINCT commit_sha) AS n FROM commits
          WHERE committed_at IS NOT NULL AND committed_at >= ?`,
       )
       .get(since) as { n: number }
   ).n;
+  const activeDaysThisWeek = new Set(
+    weekActivity
+      .filter((event) => qualifying.has(event.eventType))
+      .map((event) => event.occurredAt.slice(0, 10)),
+  ).size;
 
-  const attention = repos.filter(needsAttention);
-  const recentProjects = [...repos].sort((a, b) => {
-    const at = a.lastActivityAt || a.lastScannedAt || "";
-    const bt = b.lastActivityAt || b.lastScannedAt || "";
-    return bt.localeCompare(at);
-  });
+  // --- recently active projects: meaningful events only (spec sections 5.2, 8.2) ---
+  type MeaningfulRow = { rid: number; last_meaningful_at: string };
+  const meaningfulRows = db
+    .prepare(
+      `SELECT e.local_repository_id AS rid, MAX(e.occurred_at) AS last_meaningful_at
+       FROM activity_events e
+       WHERE e.event_type IN (${[...qualifying].map(() => "?").join(",")})
+       GROUP BY e.local_repository_id`,
+    )
+    .all(...qualifying) as MeaningfulRow[];
+  const meaningfulByRepo = new Map(meaningfulRows.map((row) => [row.rid, row.last_meaningful_at]));
+  const latestCommitByRepo = new Map<number, string>();
+  for (const row of rows) {
+    const commit = db
+      .prepare(
+        `SELECT subject FROM commits
+         WHERE local_repository_id = ? AND committed_at IS NOT NULL
+         ORDER BY committed_at DESC, id DESC LIMIT 1`,
+      )
+      .get(row.id) as { subject: string } | undefined;
+    if (commit) latestCommitByRepo.set(row.id, commit.subject);
+  }
+
+  function compactDto(row: RepoRow): RecentlyActiveProjectDto & {
+    snapshotCounts: { modified: number; staged: number; untracked: number } | null;
+    attentionReasons?: AttentionReason[];
+  } {
+    const ctx = context.get(row.id);
+    const snap = ctx?.snap ?? null;
+    const dirty = snap?.is_dirty === 1;
+    const ahead = snap?.ahead_count ?? null;
+    const behind = snap?.behind_count ?? null;
+    const upstreamRef = snap?.upstream_ref ?? null;
+    const pathExists = fs.existsSync(row.local_path);
+    const githubConnected = (ctx?.githubUrl ?? null) != null;
+
+    const reasons: AttentionReason[] = [];
+    if (!pathExists) reasons.push("repository path unavailable");
+    if (dirty) reasons.push("uncommitted changes");
+    if (upstreamRef == null) {
+      reasons.push("no upstream branch");
+    } else if ((ahead ?? 0) > 0 && (behind ?? 0) > 0) {
+      reasons.push("ahead and behind upstream");
+    } else if ((ahead ?? 0) > 0) {
+      reasons.push("ahead of upstream");
+    } else if ((behind ?? 0) > 0) {
+      reasons.push("behind upstream");
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      projectStatus: row.project_status,
+      projectType: row.project_type,
+      branch: snap?.branch ?? null,
+      workingTree: dirty ? "Uncommitted" : "Clean",
+      sync: syncTerm(upstreamRef, ahead, behind),
+      githubConnected,
+      localPath: row.local_path,
+      lastMeaningfulAt: meaningfulByRepo.get(row.id) ?? null,
+      latestCommitSubject: latestCommitByRepo.get(row.id) ?? null,
+      snapshotCounts: snap
+        ? {
+            modified: snap.modified_count,
+            staged: snap.staged_count,
+            untracked: snap.untracked_count,
+          }
+        : null,
+      attentionReasons: reasons,
+    } as RecentlyActiveProjectDto & {
+      snapshotCounts: { modified: number; staged: number; untracked: number } | null;
+      attentionReasons?: AttentionReason[];
+    };
+  }
+
+  const compact = rows.map(compactDto);
+
+  const recentlyActive = [...compact]
+    .sort((a, b) => (b.lastMeaningfulAt ?? "").localeCompare(a.lastMeaningfulAt ?? ""))
+    .slice(0, 8);
+
+  const needsAttention = compact
+    .filter((item) => (item.attentionReasons?.length ?? 0) > 0)
+    .slice(0, 20)
+    .map((item) => ({
+      ...item,
+      attentionReasons: item.attentionReasons ?? [],
+    }));
 
   return {
-    trackedProjects: repos.length,
-    uncommittedProjects: repos.filter((repo) => repo.workingTree === "Uncommitted")
-      .length,
-    activeThisWeek: activeIds.size,
+    trackedProjects: rows.length,
+    activeProjects: activeIds.size,
     commitsThisWeek,
-    needsAttention: attention.slice(0, 20),
-    recentProjects: recentProjects.slice(0, 8),
+    activeDaysThisWeek,
+    uncommittedRepositories: compact.filter((item) => item.workingTree === "Uncommitted").length,
+    recentlyActive,
+    needsAttention,
     recentActivity: listActivity({}).slice(0, 10),
   };
 }
+
+/** Test seam: identical to getDashboard but exported without route wiring. */
+export const getDashboardForTest = getDashboard;
 
 export { hasGitHubRemote };

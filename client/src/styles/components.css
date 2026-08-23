@@ -489,6 +489,63 @@ button.cell:hover:not(:disabled) {
   color: var(--accent-strong);
 }
 
+/* ---------- recently-active compact rows ---------- */
+
+.project-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.project-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 2px;
+  border-bottom: 1px dashed var(--border-strong);
+}
+
+.project-row:last-child {
+  border-bottom: none;
+}
+
+.project-row-main {
+  min-width: 0;
+}
+
+.project-row-main .row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.project-row-side {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.notice-inline {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+/* ---------- contribution preview strip ---------- */
+
+.calendar-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-strip {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.preview-strip .cell {
+  cursor: default;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1100px) {

@@ -65,6 +65,42 @@ export type EventType =
   | "ahead_changed"
   | "behind_changed";
 
+/** Compact per-project summary used by Dashboard "Recently Active". */
+export type RecentlyActiveProjectDto = {
+  id: number;
+  name: string;
+  projectStatus: ProjectStatus | null;
+  projectType: ProjectType | null;
+  branch: string | null;
+  workingTree: "Clean" | "Uncommitted";
+  sync: string;
+  githubConnected: boolean;
+  localPath: string;
+  /** Time of the most recent meaningful activity event, if any. */
+  lastMeaningfulAt: string | null;
+  latestCommitSubject: string | null;
+};
+
+export type AttentionReason =
+  | "uncommitted changes"
+  | "ahead of upstream"
+  | "behind upstream"
+  | "ahead and behind upstream"
+  | "no upstream branch"
+  | "repository path unavailable"
+  | "GitHub enrichment unavailable";
+
+export type DashboardResponse = {
+  trackedProjects: number;
+  activeProjects: number;
+  commitsThisWeek: number;
+  activeDaysThisWeek: number;
+  uncommittedRepositories: number;
+  recentlyActive: RecentlyActiveProjectDto[];
+  needsAttention: Array<RecentlyActiveProjectDto & { attentionReasons: AttentionReason[] }>;
+  recentActivity: ActivityEventDto[];
+};
+
 export type ApiErrorBody = {
   error: {
     code: string;
@@ -174,16 +210,6 @@ export type ActivityEventDto = {
   summary: string;
   occurredAt: string;
   source: string;
-};
-
-export type DashboardResponse = {
-  trackedProjects: number;
-  uncommittedProjects: number;
-  activeThisWeek: number;
-  commitsThisWeek: number;
-  needsAttention: RepositoryListItem[];
-  recentProjects: RepositoryListItem[];
-  recentActivity: ActivityEventDto[];
 };
 
 export type GitHubStatusDto = {
