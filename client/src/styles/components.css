@@ -226,6 +226,13 @@ button:disabled {
   letter-spacing: 0.05em;
 }
 
+/* ---------- typography helpers (sans/mono role split) ---------- */
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 /* ---------- badges ---------- */
 
 .pill {
