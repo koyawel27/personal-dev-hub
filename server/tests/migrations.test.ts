@@ -76,7 +76,12 @@ function createLegacyDatabase(dbPath: string): void {
   db.close();
 }
 
-const EXPECTED_MIGRATIONS = ["001_initial", "002_project_metadata", "003_app_settings"];
+const EXPECTED_MIGRATIONS = [
+  "001_initial",
+  "002_project_metadata",
+  "003_app_settings",
+  "004_projects_core",
+];
 
 describe("Ordered migrations", () => {
   it("applies 001 through 003 in order on a fresh database", () => {
