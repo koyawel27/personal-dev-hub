@@ -1,3 +1,5 @@
+import type { GitHubTerm } from "./status-terms.js";
+
 export type DiscoveryType = "scanned" | "manual";
 
 export type EventType =
@@ -92,7 +94,7 @@ export type RepositoryListItem = {
   snapshot: SnapshotDto | null;
   workingTree: "Clean" | "Uncommitted";
   sync: string;
-  github: "GitHub Connected" | "Local Only";
+  github: GitHubTerm;
   githubHtmlUrl: string | null;
   lastActivityAt: string | null;
   lastActivitySummary: string | null;

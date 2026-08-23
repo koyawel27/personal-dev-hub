@@ -662,7 +662,7 @@ export function listActivity(filters: {
   to?: string;
 }): ActivityEventDto[] {
   const clauses: string[] = [];
-  const params: unknown[] = [];
+  const params: Array<string | number> = [];
   if (filters.repositoryId != null) {
     clauses.push("e.local_repository_id = ?");
     params.push(filters.repositoryId);

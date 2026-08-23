@@ -13,9 +13,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["shared/*"]
+      "@shared/*": ["./shared/*"]
     }
   },
   "include": [
