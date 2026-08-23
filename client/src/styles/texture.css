@@ -1,0 +1,30 @@
+/*
+ * Near-invisible pixel/grid texture for SELECTED background areas only.
+ * Decorative; never applied where it costs readability.
+ */
+
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-attachment: fixed;
+}
+
+/* Empty states carry a faint stepped-square mark (see EmptyState.tsx). */
+.empty-state {
+  position: relative;
+}
+
+.empty-state::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin-bottom: 10px;
+  background: var(--accent-soft);
+  box-shadow:
+    12px 0 0 var(--accent-soft),
+    24px 0 0 var(--border);
+}

@@ -1,0 +1,51 @@
+/*
+ * Personal Dev Hub — design tokens
+ * Direction: "Warm Developer Workbench with subtle retro-computing character"
+ * Single source of truth. Page components must never hard-code hex values.
+ */
+
+:root {
+  /* warm neutrals */
+  --bg: #f3efe6;
+  --surface: #faf7f0;
+  --surface-2: #ece7db;
+  --border: #ddd5c4;
+  --border-strong: #c9bfa9;
+  --text: #2b2620;
+  --text-muted: #7a7263;
+
+  /* semantic accents — restrained */
+  --accent: #a8623a;
+  --accent-strong: #8f512e;
+  --accent-soft: #f3e4d3;
+  --ok: #4a7c59;
+  --ok-bg: #e6efe4;
+  --warn: #a3720f;
+  --warn-bg: #f7edd2;
+  --danger: #a0433a;
+  --danger-bg: #f6e4e1;
+
+  /* shape & depth */
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --shadow-offset: 2px 2px 0 rgba(43, 38, 32, 0.1);
+  --shadow-offset-press: 1px 1px 0 rgba(43, 38, 32, 0.08);
+
+  /* pixel/grid texture line (near-invisible by design) */
+  --grid-line: rgba(43, 38, 32, 0.045);
+
+  /* typography roles — sans for UI, mono for technical metadata only */
+  --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+  /*
+   * Legacy aliases (inherited stylesheet vocabulary).
+   * Components may use either name; values come from the tokens above.
+   */
+  --sidebar: var(--surface-2);
+  --muted: var(--text-muted);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
+  --clean: var(--ok);
+  --clean-bg: var(--ok-bg);
+}

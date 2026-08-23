@@ -16,6 +16,10 @@ export function eventLabel(eventType: string): string {
       return "Discovered";
     case "commit_observed":
       return "Commit";
+    case "project_status_changed":
+      return "Status";
+    case "project_note_updated":
+      return "Note";
     case "working_tree_dirty":
       return "Uncommitted";
     case "working_tree_clean":
