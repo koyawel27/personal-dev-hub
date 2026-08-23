@@ -81,6 +81,7 @@ const EXPECTED_MIGRATIONS = [
   "002_project_metadata",
   "003_app_settings",
   "004_projects_core",
+  "005_github_bindings",
 ];
 
 describe("Ordered migrations", () => {
