@@ -25,14 +25,16 @@ export function PortfolioPage() {
     const index = ordered.findIndex((entry) => entry.id === item.id);
     const target = ordered[index + direction];
     if (!target) return;
-    await client.updateMetadata(item.id, { portfolioOrder: target.portfolioOrder });
-    await client.updateMetadata(target.id, { portfolioOrder: item.portfolioOrder });
+    // Portfolio membership belongs to PROJECTS: mutate through project
+    // identity so GITHUB ONLY items work identically to local ones.
+    await client.updateProjectMetadata(item.id, { portfolioOrder: target.portfolioOrder });
+    await client.updateProjectMetadata(target.id, { portfolioOrder: item.portfolioOrder });
     notifyMutations("portfolio", "projects");
     await portfolio.refetch();
   }
 
   async function removeFromPortfolio(item: PortfolioItemDto) {
-    await client.updateMetadata(item.id, { includeInPortfolio: false });
+    await client.updateProjectMetadata(item.id, { includeInPortfolio: false });
     notifyMutations("portfolio", "projects", "dashboard");
     await portfolio.refetch();
   }
