@@ -152,6 +152,45 @@ export function ProjectDetailPage() {
               Rescan
             </button>
           ) : null}
+          {/* Source management: secondary, restrained. Registered binding id
+              only; the backend Q1 guard handles keep-or-delete safety. */}
+          {project.githubMetadata != null && bindingGhId != null ? (
+            isGithubOnly ? (
+              <button
+                type="button"
+                className="btn subtle danger"
+                disabled={busy}
+                title="Stop tracking this repository in Personal Dev Hub. The real GitHub repository is never modified."
+                onClick={() =>
+                  run(async () => {
+                    const result = await client.untrackGithub(bindingGhId!);
+                    if (result.projectDeleted) {
+                      navigate("/projects");
+                      return;
+                    }
+                    await load();
+                  })
+                }
+              >
+                Untrack GitHub
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn subtle danger"
+                disabled={busy}
+                title="Remove the GitHub binding from Personal Dev Hub. The project stays LOCAL ONLY; nothing on disk or on GitHub is touched."
+                onClick={() =>
+                  run(async () => {
+                    await client.untrackGithub(bindingGhId!);
+                    await load();
+                  })
+                }
+              >
+                Disconnect GitHub
+              </button>
+            )
+          ) : null}
         </div>
       </div>
       {error ? <div className="error">{error}</div> : null}

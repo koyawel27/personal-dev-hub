@@ -61,6 +61,16 @@ export function GithubPickerSection() {
   const [notice, setNotice] = useState<string | null>(null);
   /** Per-row refresh state: fullName -> "busy" | "ok" | "failed". */
   const [rowRefresh, setRowRefresh] = useState<Record<string, "busy" | "ok" | "failed">>({});
+  /** Per-row untrack state: fullName -> busy flag. */
+  const [rowUntrack, setRowUntrack] = useState<Record<string, boolean>>({});
+  /**
+   * Pending final-binding removal on a meaningful GITHUB ONLY project:
+   * the backend refused with PROJECT_HAS_NO_SOURCES and awaits an explicit
+   * keep-or-delete decision from the owner.
+   */
+  const [pendingDelete, setPendingDelete] = useState<{
+    entry: PickerEntryDto;
+  } | null>(null);
 
   const entries = data?.entries ?? [];
   const visible = useMemo(() => {
@@ -110,6 +120,55 @@ export function GithubPickerSection() {
       setRowRefresh((previous) => ({ ...previous, [entry.fullName]: "failed" }));
       setNotice(`Refresh failed for ${entry.fullName}. Tracking is unchanged.`);
     }
+  }
+
+  /**
+   * Remove a GitHub binding from Personal Dev Hub. Never touches the real
+   * GitHub repository or any local files.
+   *
+   * LOCAL + GITHUB rows disconnect cleanly (project survives as LOCAL ONLY).
+   * For a GITHUB ONLY row whose project holds meaningful state, the backend
+   * refuses with PROJECT_HAS_NO_SOURCES; we then surface an explicit
+   * keep-or-delete confirmation instead of retrying destructively.
+   */
+  async function untrackRow(entry: PickerEntryDto, confirmDeleteProject = false): Promise<void> {
+    if (!entry.tracked || entry.trackedBindingId == null) return;
+    setRowUntrack((previous) => ({ ...previous, [entry.fullName]: true }));
+    try {
+      const result = await client.untrackGithub(entry.trackedBindingId, confirmDeleteProject);
+      if (result.projectDeleted) {
+        setNotice(
+          `Untracked ${entry.fullName}; the empty project record was removed from Personal Dev Hub.`,
+        );
+      } else {
+        setNotice(
+          `Disconnected ${entry.fullName}. The local project remains tracked as LOCAL ONLY — nothing on disk or on GitHub was touched.`,
+        );
+      }
+      setSelected(new Set());
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        (err.code === "PROJECT_HAS_NO_SOURCES" || err.status === 409)
+      ) {
+        // Meaningful GITHUB ONLY project: ask before deleting anything.
+        setPendingDelete({ entry });
+        return;
+      }
+      setNotice(
+        err instanceof Error ? `Untrack failed: ${err.message}` : "Untrack failed.",
+      );
+    } finally {
+      setRowUntrack((previous) => ({ ...previous, [entry.fullName]: false }));
+    }
+  }
+
+  /** Explicit owner-confirmed deletion of the remaining project record. */
+  async function confirmPendingDelete(): Promise<void> {
+    const pending = pendingDelete;
+    if (!pending) return;
+    setPendingDelete(null);
+    await untrackRow(pending.entry, true);
   }
 
   async function trackSelected(): Promise<void> {
@@ -235,19 +294,42 @@ export function GithubPickerSection() {
                           : "GitHub only"}
                     </span>
                     {entry.tracked ? (
-                      <button
-                        type="button"
-                        className="btn subtle"
-                        disabled={rowRefresh[entry.fullName] === "busy"}
-                        title="Refresh this tracked repository's metadata and recent commits"
-                        onClick={() => void refreshTrackedRow(entry)}
-                      >
-                        {rowRefresh[entry.fullName] === "busy"
-                          ? "Refreshing…"
-                          : rowRefresh[entry.fullName] === "failed"
-                            ? "Retry refresh"
-                            : "Refresh"}
-                      </button>
+                      <span className="picker-actions">
+                        <button
+                          type="button"
+                          className="btn subtle"
+                          disabled={rowRefresh[entry.fullName] === "busy" || rowUntrack[entry.fullName]}
+                          title="Refresh this tracked repository's metadata and recent commits"
+                          onClick={() => void refreshTrackedRow(entry)}
+                        >
+                          {rowRefresh[entry.fullName] === "busy"
+                            ? "Refreshing…"
+                            : rowRefresh[entry.fullName] === "failed"
+                              ? "Retry refresh"
+                              : "Refresh"}
+                        </button>
+                        {entry.localCopyPath ? (
+                          <button
+                            type="button"
+                            className="btn subtle danger"
+                            disabled={rowUntrack[entry.fullName]}
+                            title="Remove the GitHub binding from Personal Dev Hub. The local project stays LOCAL ONLY; nothing on disk or on GitHub is touched."
+                            onClick={() => void untrackRow(entry)}
+                          >
+                            {rowUntrack[entry.fullName] ? "Disconnecting…" : "Disconnect GitHub"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn subtle danger"
+                            disabled={rowUntrack[entry.fullName]}
+                            title="Stop tracking this repository in Personal Dev Hub. The real GitHub repository is never modified."
+                            onClick={() => void untrackRow(entry)}
+                          >
+                            {rowUntrack[entry.fullName] ? "Untracking…" : "Untrack"}
+                          </button>
+                        )}
+                      </span>
                     ) : null}
                   </li>
                 );
@@ -272,6 +354,39 @@ export function GithubPickerSection() {
           {notice != null ? <p className="empty-line">{notice}</p> : null}
         </>
       )}
+      {pendingDelete != null ? (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="untrack-confirm-title"
+            aria-describedby="untrack-confirm-body"
+          >
+            <h3 id="untrack-confirm-title">Keep this project?</h3>
+            <p id="untrack-confirm-body">
+              Disconnecting <strong>{pendingDelete.entry.fullName}</strong> would
+              leave its Personal Dev Hub project with no tracked source. The
+              project still has history or metadata stored here.
+            </p>
+            <p className="mono muted" style={{ fontSize: 12 }}>
+              The real GitHub repository is never modified by this action.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn subtle" onClick={() => setPendingDelete(null)}>
+                Keep project (cancel)
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => void confirmPendingDelete()}
+              >
+                Delete project from Personal Dev Hub
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

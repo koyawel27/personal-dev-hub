@@ -479,6 +479,54 @@ button:disabled {
   color: var(--accent);
 }
 
+.picker-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+/* Restrained destructive treatment: visible, but never dominant. */
+.btn.danger {
+  color: #8a4a2b;
+  border-color: var(--border-strong);
+  background: transparent;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--warn-bg, #f7e8dc);
+  border-color: #b97b52;
+}
+
+/* Keep-or-delete confirmation for final-binding removal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 38, 32, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+
+.modal {
+  width: min(480px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: 4px 4px 0 rgba(43, 38, 32, 0.18);
+}
+
+.modal h3 {
+  margin-top: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .picker-foot {
   display: flex;
   align-items: center;
