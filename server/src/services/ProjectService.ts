@@ -13,6 +13,7 @@ import {
   persistActivityEventsDirect,
   type DerivedEvent,
 } from "./ActivityService.js";
+import { refreshTrackedBinding } from "./GitHubPickerService.js";
 import { fetchGitHubRepoMetadata } from "./GitHubService.js";
 
 /**
@@ -481,7 +482,18 @@ export async function trackGitHubRepository(input: {
       },
     ]);
 
-    return { githubRepositoryId: ghId, projectId, state: deriveSourceState(projectId) };
+    // Optional bounded initial refresh (owner-approved behavior): tracking
+    // has already succeeded transactionally; a GitHub failure here must not
+    // fail the request — the user can Refresh manually later.
+    let initialRefresh: "ok" | "failed" | "skipped" = "skipped";
+    try {
+      const result = await refreshTrackedBinding(ghId);
+      initialRefresh = result.ok ? "ok" : "failed";
+    } catch {
+      initialRefresh = "failed";
+    }
+
+    return { githubRepositoryId: ghId, projectId, state: deriveSourceState(projectId), initialRefresh };
   });
 }
 

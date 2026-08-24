@@ -266,6 +266,8 @@ export type PickerEntryDto = {
   affiliation: "owner" | "collaborator" | "organization_member";
   pushedAt: string | null;
   tracked: boolean;
+  /** github_repositories.id when tracked; safe handle for refresh/untrack. */
+  trackedBindingId: number | null;
   localCopyPath: string | null;
 };
 

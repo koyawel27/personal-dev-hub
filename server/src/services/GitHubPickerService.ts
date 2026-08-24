@@ -29,6 +29,8 @@ export type PickerEntry = {
   affiliation: string | null;
   pushedAt: string | null;
   tracked: boolean;
+  /** github_repositories.id when tracked; safe handle for refresh. */
+  trackedBindingId: number | null;
   /** Local copy detected for this identity (primary path). */
   localCopyPath: string | null;
 };
@@ -76,11 +78,12 @@ export async function buildPicker(): Promise<{
 
   const cachedRows = db
     .prepare(
-      `SELECT owner, name, full_name, visibility, language, description,
+      `SELECT id, owner, name, full_name, visibility, language, description,
               archived, fork, last_pushed_at, project_id
        FROM github_repositories`,
     )
     .all() as Array<{
+    id: number;
     owner: string;
     name: string;
     full_name: string;
@@ -111,6 +114,7 @@ export async function buildPicker(): Promise<{
       affiliation: null,
       pushedAt: row.last_pushed_at,
       tracked: row.project_id != null,
+      trackedBindingId: row.project_id != null ? row.id : null,
       localCopyPath: locals.get(key) ?? null,
     });
   }
@@ -154,6 +158,7 @@ export async function buildPicker(): Promise<{
           affiliation,
           pushedAt: repo.pushedAt,
           tracked: false,
+          trackedBindingId: null,
           localCopyPath: locals.get(key) ?? null,
         });
       }

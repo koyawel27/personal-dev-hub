@@ -167,10 +167,12 @@ describe("gh adapter + picker (fake gh)", () => {
       .send({ fullName: "octocat/picker-repo" });
     const ghId = track.body.githubRepositoryId as number;
 
+    // Initial refresh on track already stored the commit; a manual refresh
+    // of unchanged history adds nothing (SHA dedup + noise rule).
     const first = await request(app).post(`/api/github/tracked/${ghId}/refresh`);
     expect(first.status).toBe(200);
     expect(first.body.ok).toBe(true);
-    expect(first.body.newCommits).toBe(1);
+    expect(first.body.newCommits).toBe(0);
 
     const second = await request(app).post(`/api/github/tracked/${ghId}/refresh`);
     expect(second.body.ok).toBe(true);

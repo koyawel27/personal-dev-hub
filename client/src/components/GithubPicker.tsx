@@ -59,6 +59,8 @@ export function GithubPickerSection() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Per-row refresh state: fullName -> "busy" | "ok" | "failed". */
+  const [rowRefresh, setRowRefresh] = useState<Record<string, "busy" | "ok" | "failed">>({});
 
   const entries = data?.entries ?? [];
   const visible = useMemo(() => {
@@ -83,17 +85,52 @@ export function GithubPickerSection() {
     });
   };
 
+  /**
+   * Refresh ONE tracked repository's metadata + recent commits via the
+   * registered-binding endpoint. Distinct from "Refresh list", which only
+   * re-reads the picker discovery.
+   */
+  async function refreshTrackedRow(entry: PickerEntryDto): Promise<void> {
+    if (!entry.tracked || entry.trackedBindingId == null) return;
+    setRowRefresh((previous) => ({ ...previous, [entry.fullName]: "busy" }));
+    try {
+      const result = await client.refreshTrackedGithub(entry.trackedBindingId);
+      setRowRefresh((previous) => ({
+        ...previous,
+        [entry.fullName]: result.ok ? "ok" : "failed",
+      }));
+      if (result.ok && (result.newCommits ?? 0) > 0) {
+        setNotice(`Refreshed ${entry.fullName}: ${result.newCommits} new commit(s).`);
+      } else if (!result.ok) {
+        setNotice(
+          `Refresh failed for ${entry.fullName} (GitHub unreachable?). Tracking is unchanged.`,
+        );
+      }
+    } catch {
+      setRowRefresh((previous) => ({ ...previous, [entry.fullName]: "failed" }));
+      setNotice(`Refresh failed for ${entry.fullName}. Tracking is unchanged.`);
+    }
+  }
+
   async function trackSelected(): Promise<void> {
     if (selected.size === 0) return;
     setBusy(true);
     setNotice(null);
     let linked = 0;
     let created = 0;
+    let refreshFailed = 0;
     for (const fullName of selected) {
       try {
         const result = await client.trackGithub(fullName);
         if (result.state === "LOCAL + GITHUB") linked += 1;
         else created += 1;
+        // Optional bounded initial refresh; tracking already succeeded, so a
+        // failure here is only surfaced as a warning.
+        try {
+          await client.refreshTrackedGithub(result.githubRepositoryId);
+        } catch {
+          refreshFailed += 1;
+        }
       } catch (err) {
         if (err instanceof ApiError && err.code === "ALREADY_TRACKED") continue;
         setNotice(
@@ -109,6 +146,11 @@ export function GithubPickerSection() {
     const parts: string[] = [];
     if (linked > 0) parts.push(`${linked} linked to existing local project${linked > 1 ? "s" : ""}`);
     if (created > 0) parts.push(`${created} tracked as GitHub-only`);
+    if (refreshFailed > 0) {
+      parts.push(
+        `initial refresh failed for ${refreshFailed} — use Refresh on the tracked row later`,
+      );
+    }
     setNotice(parts.length > 0 ? `Done: ${parts.join(" · ")}.` : "Nothing new to track.");
     await reload();
   }
@@ -192,6 +234,21 @@ export function GithubPickerSection() {
                           ? "Local copy detected"
                           : "GitHub only"}
                     </span>
+                    {entry.tracked ? (
+                      <button
+                        type="button"
+                        className="btn subtle"
+                        disabled={rowRefresh[entry.fullName] === "busy"}
+                        title="Refresh this tracked repository's metadata and recent commits"
+                        onClick={() => void refreshTrackedRow(entry)}
+                      >
+                        {rowRefresh[entry.fullName] === "busy"
+                          ? "Refreshing…"
+                          : rowRefresh[entry.fullName] === "failed"
+                            ? "Retry refresh"
+                            : "Refresh"}
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}

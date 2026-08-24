@@ -23,6 +23,7 @@ export function ProjectDetailPage() {
   const id = Number(params.id);
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
   const [bindingRepoId, setBindingRepoId] = useState<number | null>(null);
+  const [bindingGhId, setBindingGhId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEventDto[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +32,25 @@ export function ProjectDetailPage() {
   async function load() {
     const detail = await client.project(id);
     setProject(detail.project);
-    // Resolve the primary local binding (if any) for local actions.
+    // Resolve registered identifiers for safe actions: the primary local
+    // binding (if any) and this project's tracked GitHub binding id, which
+    // the picker payload exposes directly for tracked rows.
     const repos = await client.repositories();
     const binding = repos.repositories.find(
       (repo) => repo.projectId === id && repo.id != null,
     );
     setBindingRepoId(binding?.id ?? null);
+    if (detail.project.githubMetadata != null && detail.project.githubFullName != null) {
+      const picker = await client.githubPicker();
+      const ghBinding = picker.entries.find(
+        (candidate) =>
+          candidate.fullName.toLowerCase() ===
+          detail.project.githubFullName!.toLowerCase(),
+      );
+      setBindingGhId(ghBinding?.trackedBindingId ?? null);
+    } else {
+      setBindingGhId(null);
+    }
     const events = await client.activity({ projectId: id });
     setActivity(events.activity);
   }
@@ -277,11 +291,41 @@ export function ProjectDetailPage() {
       {tab === "commits" ? (
         <section className="panel">
           {project.commits.length === 0 ? (
-            <p className="empty">
-              {isGithubOnly
-                ? "No commits fetched yet. Use Sources → Refresh on the tracked GitHub repository."
-                : "No recent commits."}
-            </p>
+            <>
+              <p className="empty">
+                {isGithubOnly
+                  ? "No commits fetched yet for this GitHub-only project."
+                  : "No recent commits."}
+              </p>
+              {project.githubMetadata != null && !hasLocal ? (
+                <div className="header-actions" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy || bindingGhId == null}
+                    title={
+                      bindingGhId == null
+                        ? "Refresh this repository from Sources → Browse GitHub Repositories."
+                        : "Fetch recent commits from GitHub now"
+                    }
+                    onClick={() =>
+                      run(async () => {
+                        const result = await client.refreshTrackedGithub(bindingGhId!);
+                        if (!result.ok) {
+                          setError("GitHub refresh failed. Tracking is unchanged; try again later.");
+                        }
+                        await load();
+                      })
+                    }
+                  >
+                    Refresh from GitHub
+                  </button>
+                  <span className="hint-text">
+                    Or use Sources → Browse GitHub Repositories → Refresh.
+                  </span>
+                </div>
+              ) : null}
+            </>
           ) : (
             <table className="table">
               <thead>
