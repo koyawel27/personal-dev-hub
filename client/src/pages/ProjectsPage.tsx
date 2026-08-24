@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useInvalidate } from "../useApi";
 import { Link } from "react-router-dom";
 import type { ProjectListItemDto, RepositoryListItem } from "@shared/api-types";
 import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
@@ -36,12 +37,28 @@ export function ProjectsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
 
+  async function loadAll() {
+    const [projectData, repoData] = await Promise.all([
+      client.projects(),
+      client.repositories(),
+    ]);
+    setProjects(projectData.projects);
+    setRepos(repoData.repositories);
+  }
+
+  useInvalidate(
+    ["projects", "sources", "activity", "contributions"],
+    async () => {
+      try {
+        await loadAll();
+      } catch (err: unknown) {
+        setError(err instanceof ApiError ? err.message : "Failed to refresh projects.");
+      }
+    },
+  );
+
   useEffect(() => {
-    Promise.all([client.projects(), client.repositories()])
-      .then(([projectData, repoData]) => {
-        setProjects(projectData.projects);
-        setRepos(repoData.repositories);
-      })
+    loadAll()
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : "Failed to load projects.");
       })

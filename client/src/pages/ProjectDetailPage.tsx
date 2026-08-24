@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useInvalidate } from "../useApi";
+import { notifyMutations } from "../lib/mutations";
 import type { ActivityEventDto, ProjectDetailDto } from "@shared/api-types";
 import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
 import { ApiError, client } from "../api";
@@ -64,6 +66,24 @@ export function ProjectDetailPage() {
       setError(err instanceof ApiError ? err.message : "Failed to load project.");
     });
   }, [id]);
+
+  // Route safety + cross-view reconciliation: if this project is deleted
+  // from elsewhere (or its bindings change in the picker), reload. When the
+  // project no longer exists (404), navigate to Projects instead of showing
+  // a stale/dead detail screen.
+  useInvalidate(["projects", "sources", "picker", "activity"], async () => {
+    if (!Number.isInteger(id)) return;
+    try {
+      await load();
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 404) {
+        navigate("/projects", { replace: true });
+        return;
+      }
+      // Keep current valid state; surface a recoverable refresh error.
+      setError(err instanceof Error ? err.message : "Failed to refresh project.");
+    }
+  });
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -165,9 +185,12 @@ export function ProjectDetailPage() {
                   run(async () => {
                     const result = await client.untrackGithub(bindingGhId!);
                     if (result.projectDeleted) {
-                      navigate("/projects");
+                      // Reconcile every view, then leave the dead route.
+                      notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+                      navigate("/projects", { replace: true });
                       return;
                     }
+                    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
                     await load();
                   })
                 }
@@ -183,6 +206,7 @@ export function ProjectDetailPage() {
                 onClick={() =>
                   run(async () => {
                     await client.untrackGithub(bindingGhId!);
+                    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
                     await load();
                   })
                 }
@@ -241,7 +265,10 @@ export function ProjectDetailPage() {
               commits: [],
               githubMetadata: project.githubMetadata,
             }}
-            onSaved={() => void load()}
+            onSaved={() => {
+              notifyMutations("projects", "dashboard", "portfolio", "activity", "sources");
+              void load();
+            }}
             onError={(message) => setError(message)}
           />
 

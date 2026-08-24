@@ -5,6 +5,8 @@ import { EMPTY_STATES } from "@shared/status-terms";
 import { ApiError, client } from "../api";
 import { formatDateTime } from "../format";
 import { GithubPickerSection } from "../components/GithubPicker";
+import { useInvalidate } from "../useApi";
+import { notifyMutations } from "../lib/mutations";
 
 export function SourcesPage() {
   const [sources, setSources] = useState<SourceDto[]>([]);
@@ -28,12 +30,23 @@ export function SourcesPage() {
     });
   }, []);
 
+  useInvalidate(["sources", "projects"], async () => {
+    try {
+      await reload();
+    } catch (err: unknown) {
+      setError(err instanceof ApiError ? err.message : "Failed to refresh sources.");
+    }
+  });
+
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       await action();
+      // Local-source mutations (add/scan/remove) affect projects and every
+      // derived view; reconcile app-wide, then this page.
+      notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
       await reload();
     } catch (err: unknown) {
       setError(err instanceof ApiError ? err.message : "Request failed.");

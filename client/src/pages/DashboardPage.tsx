@@ -28,10 +28,13 @@ import { useApi } from "../useApi";
  * contribution preview → Recent Activity journal beside Needs Attention.
  */
 export function DashboardPage() {
-  const dashboard = useApi(() => client.dashboard(), []);
+  const dashboard = useApi(() => client.dashboard(), [], {
+    invalidateOn: ["dashboard", "projects", "sources", "activity", "contributions"],
+  });
   const contributions = useApi(
     () => client.contributions().then((data) => data.days),
     [],
+    { invalidateOn: ["contributions", "activity", "projects", "sources"] },
   );
 
   if (dashboard.error) {

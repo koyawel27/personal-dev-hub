@@ -4,7 +4,7 @@ import type { ActivityEventDto, RepositoryListItem } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { EventFeed } from "../components/EventFeed";
 import { EmptyState } from "../components/EmptyState";
-import { useApi } from "../useApi";
+import { useApi, useInvalidate } from "../useApi";
 
 export function ActivityPage() {
   const [events, setEvents] = useState<ActivityEventDto[]>([]);
@@ -36,6 +36,23 @@ export function ActivityPage() {
         setError(err instanceof ApiError ? err.message : "Failed to load activity.");
       });
   }, []);
+
+  useInvalidate(["activity", "projects", "sources"], async () => {
+    try {
+      const [activity, repositories] = await Promise.all([
+        client.activity({
+          repositoryId: repositoryId ? Number(repositoryId) : undefined,
+          from: from ? new Date(from).toISOString() : undefined,
+          to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+        }),
+        client.repositories(),
+      ]);
+      setEvents(activity.activity);
+      setRepos(repositories.repositories);
+    } catch (err: unknown) {
+      setError(err instanceof ApiError ? err.message : "Failed to refresh activity.");
+    }
+  });
 
   return (
     <div>

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { ContributionDayDto } from "@shared/api-types";
 import { client } from "../api";
+import { notifyMutations } from "../lib/mutations";
 import { EmptyState } from "./EmptyState";
 import {
   IconAttention,
@@ -130,6 +131,8 @@ export function RescanButton() {
       setNotice(
         `${result.summary.repositoriesDiscovered} discovered · ${result.summary.repositoriesRefreshed} refreshed`,
       );
+      // A rescan can discover/refresh anything — reconcile all derived views.
+      notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
     } catch {
       setNotice("Rescan failed.");
     } finally {

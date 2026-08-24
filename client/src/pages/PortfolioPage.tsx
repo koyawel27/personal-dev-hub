@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { PortfolioItemDto } from "@shared/api-types";
 import { client } from "../api";
+import { notifyMutations } from "../lib/mutations";
 import { Badge, StatusBadge } from "../components/Badge";
 import { EmptyState } from "../components/EmptyState";
 import { formatDateTime } from "../format";
@@ -15,6 +16,7 @@ export function PortfolioPage() {
   const portfolio = useApi(
     () => client.portfolio().then((data) => data.projects),
     [],
+    { invalidateOn: ["portfolio", "projects"] },
   );
   const projects = portfolio.data ?? [];
 
@@ -25,11 +27,13 @@ export function PortfolioPage() {
     if (!target) return;
     await client.updateMetadata(item.id, { portfolioOrder: target.portfolioOrder });
     await client.updateMetadata(target.id, { portfolioOrder: item.portfolioOrder });
+    notifyMutations("portfolio", "projects");
     await portfolio.refetch();
   }
 
   async function removeFromPortfolio(item: PortfolioItemDto) {
     await client.updateMetadata(item.id, { includeInPortfolio: false });
+    notifyMutations("portfolio", "projects", "dashboard");
     await portfolio.refetch();
   }
 

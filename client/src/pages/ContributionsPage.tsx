@@ -20,7 +20,9 @@ const VIEWS: { id: ContributionView; label: string; blurb: string }[] = [
  * never hours.
  */
 export function ContributionsPage() {
-  const yearsApi = useApi(() => client.contributionYears(), []);
+  const yearsApi = useApi(() => client.contributionYears(), [], {
+    invalidateOn: ["contributions"],
+  });
   const [view, setView] = useState<ContributionView>("combined");
   const [year, setYear] = useState<number | null>(null);
 
@@ -28,6 +30,7 @@ export function ContributionsPage() {
   const contribution = useApi(
     () => client.contributionYear(activeYear, view),
     [activeYear, view],
+    { invalidateOn: ["contributions", "activity"] },
   );
 
   const [selectedDay, setSelectedDay] = useState<string | null>(null);

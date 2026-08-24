@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { PickerEntryDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
+import { notifyMutations } from "../lib/mutations";
 import { IconProjects } from "../components/icons";
 import { useApi } from "../useApi";
 
@@ -53,6 +54,7 @@ export function GithubPickerSection() {
   const { data, error, loading, refetch: reload } = useApi(
     () => client.githubPicker(),
     [],
+    { invalidateOn: ["picker", "projects"] },
   );
   const [filter, setFilter] = useState<FilterKey>("owned");
   const [query, setQuery] = useState("");
@@ -111,6 +113,8 @@ export function GithubPickerSection() {
       }));
       if (result.ok && (result.newCommits ?? 0) > 0) {
         setNotice(`Refreshed ${entry.fullName}: ${result.newCommits} new commit(s).`);
+        // New commits feed day detail, activity, contributions, dashboard.
+        notifyMutations("activity", "contributions", "dashboard", "projects");
       } else if (!result.ok) {
         setNotice(
           `Refresh failed for ${entry.fullName} (GitHub unreachable?). Tracking is unchanged.`,
@@ -145,6 +149,9 @@ export function GithubPickerSection() {
           `Disconnected ${entry.fullName}. The local project remains tracked as LOCAL ONLY — nothing on disk or on GitHub was touched.`,
         );
       }
+      // Reconcile every derived view: binding removal changes project source
+      // state, and a deleted project disappears from lists/portfolio.
+      notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
       setSelected(new Set());
     } catch (err) {
       if (
@@ -211,7 +218,12 @@ export function GithubPickerSection() {
       );
     }
     setNotice(parts.length > 0 ? `Done: ${parts.join(" · ")}.` : "Nothing new to track.");
-    await reload();
+    if (linked + created > 0) {
+      // New bindings change project source state and may create projects.
+      notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+    } else {
+      await reload();
+    }
   }
 
   return (
