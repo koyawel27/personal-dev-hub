@@ -1,38 +1,51 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { ActivityEventDto, RepositoryDetail } from "@shared/api-types";
+import type { ActivityEventDto, ProjectDetailDto } from "@shared/api-types";
 import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
 import { ApiError, client } from "../api";
 import { StatusBadge } from "../components/Badge";
 import { MetadataEditor } from "../components/MetadataEditor";
+import { SourceBadge } from "../components/SourceBadge";
 import { eventLabel, formatDateTime, shortSha } from "../format";
 
 type Tab = "overview" | "commits" | "activity";
 
+/**
+ * V1.1 Project Detail — source-aware logbook.
+ *
+ * The route id is a PROJECT id. LOCAL + GITHUB shows both information
+ * sets; LOCAL ONLY hides the GitHub panel; GITHUB ONLY hides all local
+ * state (branch/working tree/changed files) and local launcher actions.
+ */
 export function ProjectDetailPage() {
   const params = useParams();
   const navigate = useNavigate();
   const id = Number(params.id);
-  const [repo, setRepo] = useState<RepositoryDetail | null>(null);
+  const [project, setProject] = useState<ProjectDetailDto | null>(null);
+  const [bindingRepoId, setBindingRepoId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEventDto[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const detail = await client.repository(id);
-    setRepo(detail.repository);
-    const events = await client.activity({ repositoryId: id });
+    const detail = await client.project(id);
+    setProject(detail.project);
+    // Resolve the primary local binding (if any) for local actions.
+    const repos = await client.repositories();
+    const binding = repos.repositories.find((repo) => repo.projectId === id);
+    setBindingRepoId(binding?.id ?? null);
+    const events = await client.activity({ projectId: id });
     setActivity(events.activity);
   }
 
   useEffect(() => {
     if (!Number.isInteger(id)) {
-      setError("Repository was not found.");
+      setError("Project was not found.");
       return;
     }
     load().catch((err: unknown) => {
-      setError(err instanceof ApiError ? err.message : "Failed to load repository.");
+      setError(err instanceof ApiError ? err.message : "Failed to load project.");
     });
   }, [id]);
 
@@ -48,58 +61,81 @@ export function ProjectDetailPage() {
     }
   }
 
-  if (!repo && !error) return <p className="muted">Loading…</p>;
-  if (!repo) return <div className="error">{error}</div>;
+  if (!project && !error) return <p className="muted">Loading…</p>;
+  if (!project) return <div className="error">{error}</div>;
+
+  const isGithubOnly = project.sourceState === "GITHUB ONLY";
+  const hasLocal = project.sourceState !== "GITHUB ONLY" && bindingRepoId != null;
+  const snapshot = project.snapshot;
 
   return (
     <div>
       <div className="page-header">
         <div>
           <p className="muted">
-            <Link to="/projects">Projects</Link> / {repo.name}
+            <Link to="/projects">Projects</Link> / {project.name}
           </p>
-          <h1>{repo.name}</h1>
-          <p className="lede mono">{repo.localPath}</p>
+          <h1>{project.name}</h1>
+          <p className="lede mono">{project.localPath ?? project.githubFullName}</p>
           <p className="lede">
-            <StatusBadge status={repo.projectStatus} />
+            <SourceBadge state={project.sourceState} />
             {" · "}
-            {repo.projectType ?? "No type"}
+            <StatusBadge status={project.projectStatus} />
             {" · "}
-            <span className="mono">{repo.snapshot?.branch ?? "—"}</span>
-            {" · "}
-            {repo.workingTree}
+            {project.projectType ?? "No type"}
+            {!isGithubOnly ? (
+              <>
+                {" · "}
+                <span className="mono">{snapshot?.branch ?? "—"}</span>
+                {" · "}
+                {snapshot ? (snapshot.isDirty ? "Uncommitted" : "Clean") : "Not scanned"}
+              </>
+            ) : null}
           </p>
         </div>
         <div className="header-actions">
-          <button type="button" disabled={busy} onClick={() => run(() => client.open(repo.id, "folder"))}>
-            Open Folder
-          </button>
-          <button type="button" disabled={busy} onClick={() => run(() => client.open(repo.id, "terminal"))}>
-            Open Terminal
-          </button>
-          <button type="button" disabled={busy} onClick={() => run(() => client.open(repo.id, "vscode"))}>
-            Open VS Code
-          </button>
-          {repo.githubHtmlUrl ? (
-            <button type="button" disabled={busy} onClick={() => run(() => client.open(repo.id, "github"))}>
+          {hasLocal ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "folder"))}>
+                Open Folder
+              </button>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "terminal"))}>
+                Open Terminal
+              </button>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "vscode"))}>
+                Open VS Code
+              </button>
+            </>
+          ) : null}
+          {project.githubHtmlUrl && bindingRepoId != null ? (
+            <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId, "github"))}>
               Open GitHub
             </button>
+          ) : project.githubHtmlUrl ? (
+            <a
+              className="btn subtle"
+              href={project.githubHtmlUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open GitHub ↗
+            </a>
           ) : null}
-          <button
-            type="button"
-            className="primary"
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                const refreshed = await client.refresh(repo.id);
-                setRepo(refreshed.repository);
-                const events = await client.activity({ repositoryId: repo.id });
-                setActivity(events.activity);
-              })
-            }
-          >
-            Rescan
-          </button>
+          {hasLocal ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await client.refresh(bindingRepoId!);
+                  await load();
+                })
+              }
+            >
+              Rescan
+            </button>
+          ) : null}
         </div>
       </div>
       {error ? <div className="error">{error}</div> : null}
@@ -124,151 +160,142 @@ export function ProjectDetailPage() {
             Project metadata
           </h2>
           <MetadataEditor
-            repository={repo}
-            onSaved={(updated) => setRepo(updated)}
+            repository={{
+              id: project.id,
+              name: project.name,
+              projectId: project.id,
+              localPath: project.localPath ?? "",
+              canonicalPath: project.localPath ?? "",
+              discoveryType: "manual",
+              sourceId: null,
+              lastScannedAt: null,
+              snapshot: project.snapshot,
+              projectStatus: project.projectStatus,
+              projectType: project.projectType,
+              projectNote: project.projectNote,
+              includeInPortfolio: project.includeInPortfolio,
+              portfolioOrder: project.portfolioOrder,
+              workingTree: project.snapshot?.isDirty ? "Uncommitted" : "Clean",
+              sync: "",
+              github: project.githubMetadata != null ? "GitHub Connected" : "Local Only",
+              githubHtmlUrl: project.githubHtmlUrl,
+              lastActivityAt: project.lastMeaningfulAt,
+              lastActivitySummary: null,
+              changedFiles: [],
+              remotes: [],
+              commits: [],
+              githubMetadata: project.githubMetadata,
+            }}
+            onSaved={() => void load()}
             onError={(message) => setError(message)}
           />
 
-          <h2>
-            <span className="h2-mark" aria-hidden="true" />
-            Repository state
-          </h2>
-          <div className="detail-grid">
-            <div className="muted">Path</div>
-            <div className="mono">{repo.localPath}</div>
-            <div className="muted">Branch</div>
-            <div className="mono">{repo.snapshot?.branch ?? "—"}</div>
-            <div className="muted">HEAD</div>
-            <div className="mono">{shortSha(repo.snapshot?.headCommitSha)}</div>
-            <div className="muted">Working tree</div>
-            <div>
-              <span className={`pill ${repo.workingTree === "Clean" ? "clean" : "warn"}`}>
-                {repo.workingTree}
-              </span>
-              {`  modified ${repo.snapshot?.modifiedCount ?? 0} · staged ${repo.snapshot?.stagedCount ?? 0} · untracked ${repo.snapshot?.untrackedCount ?? 0}`}
-            </div>
-            <div className="muted">Sync</div>
-            <div>
-              {repo.sync}
-              <div className="muted">{LOCAL_REMOTE_DISCLAIMER}</div>
-            </div>
-            <div className="muted">Last scan</div>
-            <div>{formatDateTime(repo.lastScannedAt)}</div>
-            <div className="muted">GitHub</div>
-            <div>{repo.github}</div>
-          </div>
-
-          <h2>
-            <span className="h2-mark" aria-hidden="true" />
-            Changed files
-          </h2>
-          {repo.changedFiles.length === 0 ? (
-            <p className="empty">No changed files.</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Path</th>
-                  <th>Kind</th>
-                  <th>Index</th>
-                  <th>Work tree</th>
-                </tr>
-              </thead>
-              <tbody>
-                {repo.changedFiles.map((file) => (
-                  <tr key={file.path}>
-                    <td className="mono">{file.path}</td>
-                    <td>{file.kind}</td>
-                    <td className="mono">{file.indexStatus}</td>
-                    <td className="mono">{file.workTreeStatus}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <h2>
-            <span className="h2-mark" aria-hidden="true" />
-            Remotes
-          </h2>
-          {repo.remotes.length === 0 ? (
-            <p className="empty">No remotes configured.</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>URL</th>
-                  <th>Host</th>
-                </tr>
-              </thead>
-              <tbody>
-                {repo.remotes.map((remote) => (
-                  <tr key={remote.name}>
-                    <td className="mono">{remote.name}</td>
-                    <td className="mono">{remote.url}</td>
-                    <td>{remote.isGitHub ? "GitHub Connected" : remote.host || "Local Only"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {repo.githubMetadata ? (
+          {!isGithubOnly ? (
             <>
-              <h2>GitHub metadata</h2>
+              <h2>
+                <span className="h2-mark" aria-hidden="true" />
+                Repository state
+              </h2>
               <div className="detail-grid">
-                <div className="muted">Repository</div>
-                <div>{repo.githubMetadata.fullName}</div>
-                <div className="muted">Visibility</div>
-                <div>{repo.githubMetadata.visibility ?? "—"}</div>
-                <div className="muted">Default branch</div>
-                <div className="mono">{repo.githubMetadata.defaultBranch ?? "—"}</div>
-                <div className="muted">Last pushed</div>
-                <div>{formatDateTime(repo.githubMetadata.lastPushedAt)}</div>
+                <div className="muted">Path</div>
+                <div className="mono">{project.localPath}</div>
+                <div className="muted">Branch</div>
+                <div className="mono">{snapshot?.branch ?? "—"}</div>
+                <div className="muted">HEAD</div>
+                <div className="mono">{shortSha(snapshot?.headCommitSha)}</div>
+                {snapshot ? (
+                  <>
+                    <div className="muted">Working tree</div>
+                    <div>
+                      <span className={`pill ${snapshot.isDirty ? "warn" : "clean"}`}>
+                        {snapshot.isDirty ? "Uncommitted" : "Clean"}
+                      </span>
+                      {`  modified ${snapshot.modifiedCount} · staged ${snapshot.stagedCount} · untracked ${snapshot.untrackedCount}`}
+                    </div>
+                    <div className="muted">Sync</div>
+                    <div>
+                      <span className="mono muted">{LOCAL_REMOTE_DISCLAIMER}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="muted">Scan</div>
+                )}
               </div>
             </>
           ) : null}
 
-          <div className="header-actions" style={{ marginTop: 16 }}>
-            <button
-              type="button"
-              className="danger"
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  if (!window.confirm("Remove this repository from the dashboard? Files on disk are not deleted.")) {
-                    return;
-                  }
-                  await client.deleteRepository(repo.id);
-                  navigate("/projects");
-                })
-              }
-            >
-              Remove from dashboard
-            </button>
-          </div>
+          {project.githubMetadata ? (
+            <>
+              <h2>
+                <span className="h2-mark" aria-hidden="true" />
+                GitHub
+              </h2>
+              <div className="detail-grid">
+                <div className="muted">Repository</div>
+                <div>{project.githubMetadata.fullName}</div>
+                <div className="muted">Visibility</div>
+                <div>{project.githubMetadata.visibility ?? "—"}</div>
+                <div className="muted">Default branch</div>
+                <div className="mono">{project.githubMetadata.defaultBranch ?? "—"}</div>
+                <div className="muted">Last pushed</div>
+                <div>{formatDateTime(project.githubMetadata.lastPushedAt)}</div>
+                <div className="muted">URL</div>
+                <div>
+                  <a href={project.githubMetadata.htmlUrl} target="_blank" rel="noreferrer" className="mono">
+                    {project.githubMetadata.htmlUrl}
+                  </a>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {hasLocal ? (
+            <div className="header-actions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
+                      return;
+                    }
+                    await client.deleteRepository(bindingRepoId!);
+                    navigate("/projects");
+                  })
+                }
+              >
+                Remove local copy from dashboard
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
       {tab === "commits" ? (
         <section className="panel">
-          {repo.commits.length === 0 ? (
-            <p className="empty">No recent commits.</p>
+          {project.commits.length === 0 ? (
+            <p className="empty">
+              {isGithubOnly
+                ? "No commits fetched yet. Use Sources → Refresh on the tracked GitHub repository."
+                : "No recent commits."}
+            </p>
           ) : (
             <table className="table">
               <thead>
                 <tr>
                   <th>SHA</th>
+                  <th>Source</th>
                   <th>Subject</th>
                   <th>Author</th>
                   <th>Date</th>
                 </tr>
               </thead>
               <tbody>
-                {repo.commits.map((commit) => (
-                  <tr key={commit.sha}>
+                {project.commits.map((commit) => (
+                  <tr key={`${commit.source}-${commit.sha}`}>
                     <td className="mono">{commit.shortSha}</td>
+                    <td className="mono muted">{commit.source}</td>
                     <td>{commit.subject}</td>
                     <td>{commit.authorName ?? "—"}</td>
                     <td>{formatDateTime(commit.committedAt)}</td>

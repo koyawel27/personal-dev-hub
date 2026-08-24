@@ -374,7 +374,164 @@ button:disabled {
   font-size: 12px;
 }
 
-/* ---------- badges ---------- */
+/* ---------- GitHub repository picker (V1.1) ---------- */
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.picker-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.picker-search {
+  max-width: 340px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 3px);
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.chip.active {
+  background: var(--accent-soft, rgba(176, 108, 63, 0.14));
+  border-color: var(--accent);
+  color: var(--accent-text, var(--text));
+}
+
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-row.selected {
+  background: var(--accent-soft, rgba(176, 108, 63, 0.08));
+}
+
+.picker-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.picker-main input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.picker-state {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.picker-state.on {
+  color: var(--accent);
+}
+
+.picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.hint-text {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------- source-state badges (V1.1) ---------- */
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 3px);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.source-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+}
+
+.source-badge.state-local-github {
+  color: #7a5230;
+  border-color: #d8b28c;
+  background: rgba(176, 108, 63, 0.1);
+}
+
+.source-badge.state-local-only {
+  color: var(--text-muted);
+}
+
+.source-badge.state-github-only {
+  color: #4e607a;
+  border-color: #b3c2d6;
+  background: rgba(78, 96, 122, 0.08);
+}
+
 
 .pill {
   display: inline-block;

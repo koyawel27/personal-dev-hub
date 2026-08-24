@@ -72,21 +72,46 @@ export function SettingsPage() {
       <section className="panel">
         <h2>
           <span className="h2-mark" aria-hidden="true" />
+          GitHub connection
+        </h2>
+        <div className="detail-grid">
+          <div className="muted">GitHub CLI</div>
+          <div>
+            <span className={`pill ${status?.installed ? "clean" : "neutral"}`}>
+              {status == null ? "…" : status.installed ? "Installed" : "Missing"}
+            </span>
+          </div>
+          <div className="muted">GitHub account</div>
+          <div>
+            {status == null ? (
+              "…"
+            ) : status.authenticated ? (
+              <>
+                <span className="pill clean">Connected</span>
+                {status.accountName ? (
+                  <span className="mono"> {status.accountName}</span>
+                ) : null}
+              </>
+            ) : (
+              <span className="pill neutral">Not connected</span>
+            )}
+          </div>
+        </div>
+        <p className="empty-state-hint" style={{ marginTop: 8 }}>
+          Connection is read from the existing GitHub CLI login — Personal Dev Hub
+          never stores a token. Repository selection lives under{" "}
+          <a href="/sources">Sources → Browse GitHub Repositories</a>.
+        </p>
+      </section>
+
+      <section className="panel">
+        <h2>
+          <span className="h2-mark" aria-hidden="true" />
           Tooling
         </h2>
         <div className="detail-grid">
           <div className="muted">Git executable</div>
           <div className="mono">{settings?.gitExecutable ?? "—"}</div>
-          <div className="muted">GitHub CLI</div>
-          <div>
-            {!status
-              ? "Loading…"
-              : status.installed
-                ? status.authenticated
-                  ? `Authenticated${status.accountName ? ` as ${status.accountName}` : ""}`
-                  : "Installed, not authenticated"
-                : "Missing"}
-          </div>
           <div className="muted">App data</div>
           <div className="mono">data/dashboard.sqlite (project folder)</div>
         </div>

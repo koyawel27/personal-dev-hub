@@ -20,7 +20,7 @@ export function MetadataEditor({
   onError,
 }: {
   repository: RepositoryDetail;
-  onSaved: (updated: RepositoryDetail) => void;
+  onSaved: (updated: unknown) => void;
   onError: (message: string) => void;
 }) {
   const [status, setStatus] = useState<string>(repository.projectStatus ?? "");
@@ -57,8 +57,8 @@ export function MetadataEditor({
     if (Object.keys(body).length === 0) return;
     setSaving(true);
     try {
-      const result = await client.updateMetadata(repository.id, body);
-      onSaved(result.repository);
+      const result = await client.updateProjectMetadata(repository.id, body);
+      onSaved(result.project);
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (err: unknown) {

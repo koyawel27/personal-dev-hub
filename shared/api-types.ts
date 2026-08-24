@@ -253,6 +253,53 @@ export type ActivityEventDto = {
   source: string;
 };
 
+/** Picker row served by GET /api/github/repositories. */
+export type PickerEntryDto = {
+  owner: string;
+  name: string;
+  fullName: string;
+  visibility: string | null;
+  language: string | null;
+  description: string | null;
+  archived: boolean;
+  fork: boolean;
+  affiliation: "owner" | "collaborator" | "organization_member";
+  pushedAt: string | null;
+  tracked: boolean;
+  localCopyPath: string | null;
+};
+
+/** Project list row served by GET /api/projects. */
+export type ProjectListItemDto = {
+  id: number;
+  name: string;
+  sourceState: SourceState;
+  projectStatus: ProjectStatus | null;
+  projectType: ProjectType | null;
+  includeInPortfolio: boolean;
+  portfolioOrder: number | null;
+  /** Primary local copy path; null for GITHUB ONLY projects. */
+  localPath: string | null;
+  githubFullName: string | null;
+  githubHtmlUrl: string | null;
+  lastMeaningfulAt: string | null;
+};
+
+/** Source-aware project detail served by GET /api/projects/:id. */
+export type ProjectDetailDto = ProjectListItemDto & {
+  projectNote: string | null;
+  snapshot: SnapshotDto | null;
+  githubMetadata: GitHubMetadataDto | null;
+  commits: Array<{
+    sha: string;
+    shortSha: string;
+    subject: string;
+    authorName: string | null;
+    committedAt: string | null;
+    source: "local" | "github";
+  }>;
+};
+
 export type GitHubStatusDto = {
   installed: boolean;
   authenticated: boolean;

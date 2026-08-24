@@ -1,21 +1,28 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { DailyDetailResponse } from "@shared/api-types";
+import type { ContributionView, DailyDetailResponse } from "@shared/api-types";
 import { client } from "../api";
 import { ContributionCalendar } from "../components/ContributionCalendar";
 import { EmptyState } from "../components/EmptyState";
 import { shortSha } from "../format";
 import { useApi } from "../useApi";
 
+const VIEWS: { id: ContributionView; label: string; blurb: string }[] = [
+  { id: "combined", label: "Combined", blurb: "Local + GitHub, duplicate commits collapsed" },
+  { id: "local", label: "Local", blurb: "Commits discovered from local repository bindings" },
+  { id: "github", label: "GitHub", blurb: "Tracked GitHub repositories only" },
+];
+
 /**
- * First-class contributions view (plan section 8.3): original warm-scale
- * calendar, day drill-down grouped per project, source labels always
- * explicit. Counts are commits — never hours.
+ * Contributions (V1.1): three honest views. This is NOT the user's complete
+ * GitHub contribution graph — only tracked repositories' commits are shown.
+ * Counts are commits, never hours.
  */
 export function ContributionsPage() {
+  const [view, setView] = useState<ContributionView>("combined");
   const contribution = useApi(
-    () => client.contributions().then((data) => data.days),
-    [],
+    () => client.contributions(view).then((data) => data.days),
+    [view],
   );
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayDetail, setDayDetail] = useState<DailyDetailResponse | null>(null);
@@ -28,10 +35,16 @@ export function ContributionsPage() {
     setDayError(null);
     if (!day) return;
     try {
-      setDayDetail(await client.contributionDay(day));
+      setDayDetail(await client.contributionDay(day, view));
     } catch {
       setDayError("Could not load detail for that day.");
     }
+  }
+
+  function switchView(next: ContributionView): void {
+    setView(next);
+    setSelectedDay(null);
+    setDayDetail(null);
   }
 
   return (
@@ -40,8 +53,8 @@ export function ContributionsPage() {
         <div>
           <h1>Contributions</h1>
           <p className="lede">
-            Local commit activity across your projects. Counts are commits, not
-            hours.
+            Tracked commit activity across your projects — local Git observation
+            and selected GitHub repositories. Counts are commits, not hours.
           </p>
         </div>
         <button type="button" onClick={() => void contribution.refetch()}>
@@ -49,20 +62,52 @@ export function ContributionsPage() {
         </button>
       </div>
       {contribution.error ? <div className="error">{contribution.error}</div> : null}
+
+      <div className="filters" role="tablist">
+        {VIEWS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            title={option.blurb}
+            className={`filter-chip ${view === option.id ? "active" : ""}`}
+            onClick={() => switchView(option.id)}
+          >
+            {option.label}
+            {option.id === "github" ? " (tracked)" : ""}
+          </button>
+        ))}
+      </div>
+
       {contribution.loading ? (
         <p className="muted">Loading…</p>
       ) : days.length === 0 ? (
         <EmptyState
-          message="No development activity recorded yet."
-          hint={<span>Commit something in a tracked project, then refresh.</span>}
+          message={
+            view === "local"
+              ? "No local commit activity recorded yet."
+              : view === "github"
+                ? "No tracked GitHub commit activity yet."
+                : "No development activity recorded yet."
+          }
+          hint={
+            <span>
+              {view === "github"
+                ? "Track repositories and refresh them under Sources → Browse GitHub Repositories."
+                : "Commit something in a tracked project, then rescan."}
+            </span>
+          }
         />
       ) : (
         <>
           <section className="panel">
             <h2>
               <span className="h2-mark" aria-hidden="true" />
-              This month · Local source
+              This month ·{" "}
+              {VIEWS.find((option) => option.id === view)?.label ?? view} source
             </h2>
+            <p className="mono muted" style={{ marginTop: -4 }}>
+              {VIEWS.find((option) => option.id === view)?.blurb}
+            </p>
             <ContributionCalendar
               days={days}
               selectedDay={selectedDay}
@@ -98,7 +143,15 @@ export function ContributionsPage() {
                   </div>
                 ))
               )}
-              <p className="mono muted">Source: local git observation</p>
+              <p className="mono muted">
+                Source:{" "}
+                {view === "local"
+                  ? "local git observation"
+                  : view === "github"
+                    ? "tracked GitHub repositories"
+                    : "local + tracked GitHub (duplicates collapsed)"}
+                {" · not a full GitHub profile graph"}
+              </p>
             </section>
           ) : null}
         </>

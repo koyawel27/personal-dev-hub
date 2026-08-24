@@ -7,10 +7,13 @@ import type {
   GitHubStatusDto,
   HealthResponse,
   PortfolioItemDto,
+  ProjectDetailDto,
+  ProjectListItemDto,
   RepositoryDetail,
   RepositoryListItem,
   ScanSummary,
   SourceDto,
+  PickerEntryDto,
   UpdateMetadataRequest,
 } from "@shared/api-types";
 
@@ -82,9 +85,10 @@ export const client = {
     api<{ ok: true }>(`/api/repositories/${id}`, { method: "DELETE" }),
   open: (id: number, action: "folder" | "terminal" | "vscode" | "github") =>
     api<{ ok: true }>(`/api/repositories/${id}/open/${action}`, { method: "POST" }),
-  activity: (params?: { repositoryId?: number; from?: string; to?: string }) => {
+  activity: (params?: { repositoryId?: number; projectId?: number; from?: string; to?: string }) => {
     const search = new URLSearchParams();
     if (params?.repositoryId) search.set("repositoryId", String(params.repositoryId));
+    if (params?.projectId) search.set("projectId", String(params.projectId));
     if (params?.from) search.set("from", params.from);
     if (params?.to) search.set("to", params.to);
     const q = search.toString();
@@ -98,9 +102,50 @@ export const client = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  contributions: () => api<{ days: ContributionDayDto[] }>("/api/contributions"),
-  contributionDay: (day: string) =>
-    api<DailyDetailResponse>(`/api/contributions/${day}`),
+  contributions: (view?: "local" | "github" | "combined") =>
+    api<{ days: ContributionDayDto[]; source: string }>(
+      `/api/contributions${view && view !== "combined" ? `?view=${view}` : ""}`,
+    ),
+  contributionDay: (day: string, view?: "local" | "github" | "combined") =>
+    api<DailyDetailResponse>(
+      `/api/contributions/${day}${view && view !== "combined" ? `?view=${view}` : ""}`,
+    ),
   portfolio: () =>
     api<{ projects: PortfolioItemDto[] }>("/api/portfolio"),
+  // --- V1.1 project + GitHub tracking ---
+  projects: (params?: { state?: string; query?: string }) => {
+    const search = new URLSearchParams();
+    if (params?.state) search.set("state", params.state);
+    if (params?.query) search.set("query", params.query);
+    const q = search.toString();
+    return api<{ projects: ProjectListItemDto[] }>(`/api/projects${q ? `?${q}` : ""}`);
+  },
+  project: (id: number) =>
+    api<{ project: ProjectDetailDto }>(`/api/projects/${id}`),
+  updateProjectMetadata: (id: number, body: UpdateMetadataRequest) =>
+    api<{ project: ProjectDetailDto }>(`/api/projects/${id}/metadata`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  githubPicker: () =>
+    api<{
+      entries: PickerEntryDto[];
+      available: boolean;
+    }>("/api/github/repositories"),
+
+  trackGithub: (fullName: string) =>
+    api<{ githubRepositoryId: number; projectId: number; state: string }>(
+      "/api/github/tracked",
+      { method: "POST", body: JSON.stringify({ fullName }) },
+    ),
+  untrackGithub: (id: number, confirmDeleteProject?: boolean) =>
+    api<{ ok: true; projectDeleted: boolean }>(
+      `/api/github/tracked/${id}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
+      { method: "DELETE" },
+    ),
+  refreshTrackedGithub: (id: number) =>
+    api<{ ok: boolean; reason?: string; newCommits?: number }>(
+      `/api/github/tracked/${id}/refresh`,
+      { method: "POST" },
+    ),
 };

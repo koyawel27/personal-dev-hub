@@ -2,12 +2,13 @@ import { Link } from "react-router-dom";
 import type { RecentlyActiveProjectDto } from "@shared/api-types";
 import { StatusBadge, WorkingTreeBadge } from "./Badge";
 import { EmptyState } from "./EmptyState";
-import { relativeTime, shortSha } from "../format";
+import { SourceBadge } from "./SourceBadge";
+import { relativeTime } from "../format";
 
 /**
- * Compact structured project rows for Dashboard "Recently Active" (plan 8.3).
- * Priority metadata: name, status/type, last meaningful activity, latest
- * commit, branch, clean state. Secondary: GitHub/local, ahead/behind.
+ * Compact structured project rows for Dashboard "Recently Active".
+ * Source-aware (V1.1): GITHUB ONLY rows show GitHub identity instead of a
+ * branch and omit local working-tree state entirely.
  */
 export function ProjectRowList({
   projects,
@@ -21,32 +22,47 @@ export function ProjectRowList({
   }
   return (
     <div className="project-rows">
-      {projects.map((project) => (
-        <div className="project-row" key={project.id}>
-          <div className="project-row-main">
-            <Link className="list-link" to={`/projects/${project.id}`}>
-              {project.name}
-            </Link>
-            <span className="row-meta">
-              {" "}
-              {project.projectType ?? "No type"} ·{" "}
-              <StatusBadge status={project.projectStatus} /> ·{" "}
-              <WorkingTreeBadge isDirty={project.workingTree === "Uncommitted"} />
-            </span>
-            <div className="mono muted">
-              {project.branch ?? "—"}
-              {project.latestCommitSubject ? ` · ${project.latestCommitSubject}` : ""}
+      {projects.map((project) => {
+        const isGithubOnly = project.sourceState === "GITHUB ONLY";
+        return (
+          <div className="project-row" key={project.id}>
+            <div className="project-row-main">
+              <Link className="list-link" to={`/projects/${project.id}`}>
+                {project.name}
+              </Link>
+              <span className="row-meta">
+                {" "}
+                <SourceBadge state={project.sourceState} /> ·{" "}
+                {project.projectType ?? "No type"} ·{" "}
+                <StatusBadge status={project.projectStatus} />
+                {!isGithubOnly ? (
+                  <>
+                    {" ·"}
+                    <WorkingTreeBadge isDirty={project.workingTree === "Uncommitted"} />
+                  </>
+                ) : null}
+              </span>
+              <div className="mono muted">
+                {!isGithubOnly ? `${project.branch ?? "—"} · ` : ""}
+                {project.latestCommitSubject ?? "no commits observed yet"}
+              </div>
+            </div>
+            <div className="project-row-side muted">
+              <div>{relativeTime(project.lastMeaningfulAt)}</div>
+              <div>
+                {isGithubOnly
+                  ? project.githubConnected
+                    ? "GitHub only"
+                    : "GitHub"
+                  : project.githubConnected
+                    ? "Local + GitHub"
+                    : "Local only"}
+                {!isGithubOnly ? ` · ${project.sync}` : ""}
+              </div>
             </div>
           </div>
-          <div className="project-row-side muted">
-            <div>{relativeTime(project.lastMeaningfulAt)}</div>
-            <div>
-              {project.githubConnected ? "GitHub" : "Local only"} · {project.sync}
-            </div>
-            <div className="mono">{shortSha(project.branch ?? null)}</div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

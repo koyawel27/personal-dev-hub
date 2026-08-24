@@ -4,6 +4,7 @@ import type { RepositoryListItem, SourceDto } from "@shared/api-types";
 import { EMPTY_STATES } from "@shared/status-terms";
 import { ApiError, client } from "../api";
 import { formatDateTime } from "../format";
+import { GithubPickerSection } from "../components/GithubPicker";
 
 export function SourcesPage() {
   const [sources, setSources] = useState<SourceDto[]>([]);
@@ -226,6 +227,8 @@ export function SourcesPage() {
           </table>
         )}
       </section>
+
+      <GithubPickerSection />
     </div>
   );
 }
