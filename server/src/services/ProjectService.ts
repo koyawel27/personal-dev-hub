@@ -237,7 +237,7 @@ export async function getProjectDetail(id: number): Promise<{
     }
     const locals = db
       .prepare(
-        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at
+        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at AS committedAt
          FROM commits WHERE local_repository_id = ?
          ORDER BY committed_at DESC, id DESC LIMIT 20`,
       )
@@ -257,7 +257,7 @@ export async function getProjectDetail(id: number): Promise<{
   if (state === "GITHUB ONLY" && gh) {
     const gcs = db
       .prepare(
-        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at
+        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at AS committedAt
          FROM github_commits WHERE github_repository_id = ?
          ORDER BY committed_at DESC, id DESC LIMIT 20`,
       )
