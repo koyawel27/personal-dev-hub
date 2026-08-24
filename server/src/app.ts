@@ -36,6 +36,7 @@ import {
   contributionDays,
   dailyDetail,
 } from "./services/ContributionService.js";
+import { buildPicker, refreshTrackedBinding } from "./services/GitHubPickerService.js";
 import { listPortfolio } from "./services/PortfolioService.js";
 import { githubOnlyCounts } from "./services/GitHubContributionsService.js";
 import {
@@ -226,6 +227,29 @@ export function createApp(): express.Express {
       }
       const confirmDeleteProject = req.query.confirmDeleteProject === "true";
       untrackGitHubRepository({ githubRepositoryId: id, confirmDeleteProject })
+        .then((result) => res.json(result))
+        .catch(next);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/github/repositories", async (_req, res, next) => {
+    try {
+      const picker = await buildPicker();
+      res.json(picker);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/github/tracked/:id/refresh", (req, res, next) => {
+    try {
+      const id = parseNumericId(req.params.id);
+      if (id == null) {
+        throw new AppError(ErrorCodes.GITHUB_REPO_NOT_FOUND, "Not found.", 404);
+      }
+      refreshTrackedBinding(id)
         .then((result) => res.json(result))
         .catch(next);
     } catch (err) {
