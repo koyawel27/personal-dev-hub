@@ -106,6 +106,21 @@ export const client = {
     api<{ days: ContributionDayDto[]; source: string }>(
       `/api/contributions${view && view !== "combined" ? `?view=${view}` : ""}`,
     ),
+  contributionYears: () =>
+    api<{ years: number[] }>("/api/contributions/years"),
+  contributionYear: (year: number, view: "local" | "github" | "combined") =>
+    api<{
+      year: number;
+      source: string;
+      days: ContributionDayDto[];
+      totals: { commits: number; activeDays: number; projects: number };
+      dedup?: {
+        localObserved: number;
+        githubObserved: number;
+        overlap: number;
+        combinedUnique: number;
+      };
+    }>(`/api/contributions/year?y=${year}&view=${view}`),
   contributionDay: (day: string, view?: "local" | "github" | "combined") =>
     api<DailyDetailResponse>(
       `/api/contributions/${day}${view && view !== "combined" ? `?view=${view}` : ""}`,

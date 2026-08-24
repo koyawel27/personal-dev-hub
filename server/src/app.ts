@@ -35,6 +35,8 @@ import {
 } from "./services/ProjectService.js";
 import {
   contributionDays,
+  contributionYear,
+  contributionYears,
   dailyDetail,
 } from "./services/ContributionService.js";
 import { buildPicker, refreshTrackedBinding } from "./services/GitHubPickerService.js";
@@ -322,6 +324,29 @@ export function createApp(): express.Express {
           ? rawView
           : "combined";
       res.json({ days: contributionDays(from, to, view), source: view });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/contributions/years", (req, res, next) => {
+    try {
+      void req;
+      res.json({ years: contributionYears() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/contributions/year", (req, res, next) => {
+    try {
+      const rawYear = typeof req.query.y === "string" ? Number(req.query.y) : new Date().getUTCFullYear();
+      const rawView = typeof req.query.view === "string" ? req.query.view : "combined";
+      const view =
+        rawView === "local" || rawView === "github" || rawView === "combined"
+          ? rawView
+          : "combined";
+      res.json(contributionYear(Number(rawYear), view));
     } catch (err) {
       next(err);
     }

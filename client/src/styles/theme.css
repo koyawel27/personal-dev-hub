@@ -20,6 +20,11 @@
   --accent: #a8623a;
   --accent-strong: #8f512e;
   --accent-soft: #f3e4d3;
+
+  /* contribution year-grid geometry */
+  --cell-size: 12px;
+  --cell-step: 15px;
+  --weeks: 54;
   --ok: #4a7c59;
   --ok-bg: #e6efe4;
   --warn: #a3720f;

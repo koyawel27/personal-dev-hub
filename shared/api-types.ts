@@ -37,16 +37,45 @@ export type ContributionDayDto = {
   total: number;
   /** Portion contributed by local Git observation. */
   localCount: number;
-  /** Portion contributed by tracked GitHub bindings (not already local). */
+  /** Distinct commits fetched from tracked GitHub bindings (independent count). */
   githubCount: number;
 };
 
 /** Contribution aggregation view (V1.1): honest per-source lenses. */
 export type ContributionView = "local" | "github" | "combined";
 
+/** Compact real statistics for a contributions view (no trends/streaks). */
+export type ContributionTotals = {
+  /** Unique commits under the selected lens. */
+  commits: number;
+  /** Days with at least one commit under the selected lens. */
+  activeDays: number;
+  /** Projects that contributed under the selected lens. */
+  projects: number;
+};
+
+/**
+ * Combined-view transparency: proves the combined number is a union, not a
+ * naive sum. overlap = SHAs observed in BOTH stores; combinedUnique =
+ * localObserved ∪ githubObserved.
+ */
+export type ContributionDedup = {
+  localObserved: number;
+  githubObserved: number;
+  overlap: number;
+  combinedUnique: number;
+};
+
+/** Years that hold tracked commit data (for the year selector). */
+export type ContributionYearsDto = {
+  years: number[];
+};
+
 export type DailyProjectCommits = {
   repositoryId: number;
   projectName: string;
+  /** "local" | "github" | "LOCAL + GITHUB" (dual observation). */
+  source: string;
   commits: CommitDto[];
 };
 
@@ -185,6 +214,8 @@ export type CommitDto = {
   subject: string;
   authorName: string | null;
   committedAt: string | null;
+  /** Day-detail only: "local" | "github" | "LOCAL + GITHUB". */
+  source?: string;
 };
 
 export type GitHubMetadataDto = {

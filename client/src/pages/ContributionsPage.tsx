@@ -8,26 +8,33 @@ import { shortSha } from "../format";
 import { useApi } from "../useApi";
 
 const VIEWS: { id: ContributionView; label: string; blurb: string }[] = [
-  { id: "combined", label: "Combined", blurb: "Local + GitHub, duplicate commits collapsed" },
-  { id: "local", label: "Local", blurb: "Commits discovered from local repository bindings" },
-  { id: "github", label: "GitHub", blurb: "Tracked GitHub repositories only" },
+  { id: "combined", label: "COMBINED", blurb: "Union of local + GitHub; overlapping commits counted once" },
+  { id: "local", label: "LOCAL", blurb: "Unique commits observed from tracked local repository bindings" },
+  { id: "github", label: "GITHUB", blurb: "Unique commits fetched from selected tracked GitHub repositories" },
 ];
 
 /**
- * Contributions (V1.1): three honest views. This is NOT the user's complete
- * GitHub contribution graph — only tracked repositories' commits are shown.
- * Counts are commits, never hours.
+ * Contributions — year activity view. Tracked commits only (local Git
+ * observation + selected tracked GitHub repositories); this is not a
+ * reproduction of GitHub's full contribution model. Counts are commits,
+ * never hours.
  */
 export function ContributionsPage() {
+  const yearsApi = useApi(() => client.contributionYears(), []);
   const [view, setView] = useState<ContributionView>("combined");
+  const [year, setYear] = useState<number | null>(null);
+
+  const activeYear = year ?? yearsApi.data?.years[0] ?? new Date().getFullYear();
   const contribution = useApi(
-    () => client.contributions(view).then((data) => data.days),
-    [view],
+    () => client.contributionYear(activeYear, view),
+    [activeYear, view],
   );
+
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayDetail, setDayDetail] = useState<DailyDetailResponse | null>(null);
   const [dayError, setDayError] = useState<string | null>(null);
-  const days = contribution.data ?? [];
+  const days = contribution.data?.days ?? [];
+  const totals = contribution.data?.totals;
 
   async function selectDay(day: string | null): Promise<void> {
     setSelectedDay(day);
@@ -47,14 +54,16 @@ export function ContributionsPage() {
     setDayDetail(null);
   }
 
+  const dedup = contribution.data?.dedup;
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>Contributions</h1>
           <p className="lede">
-            Tracked commit activity across your projects — local Git observation
-            and selected GitHub repositories. Counts are commits, not hours.
+            Tracked commits across your projects — local Git observation and
+            selected GitHub repositories. Counts are commits, not hours.
           </p>
         </div>
         <button type="button" onClick={() => void contribution.refetch()}>
@@ -63,63 +72,116 @@ export function ContributionsPage() {
       </div>
       {contribution.error ? <div className="error">{contribution.error}</div> : null}
 
-      <div className="filters" role="tablist">
-        {VIEWS.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            title={option.blurb}
-            className={`filter-chip ${view === option.id ? "active" : ""}`}
-            onClick={() => switchView(option.id)}
-          >
-            {option.label}
-            {option.id === "github" ? " (tracked)" : ""}
-          </button>
-        ))}
+      <div className="contrib-controls">
+        <div className="filters" role="tablist" aria-label="Contribution source">
+          {VIEWS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={view === option.id}
+              title={option.blurb}
+              className={`filter-chip ${view === option.id ? "active" : ""}`}
+              onClick={() => switchView(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {yearsApi.data && yearsApi.data.years.length > 1 ? (
+          <label className="year-select">
+            <span className="micro-label">Year</span>
+            <select
+              value={activeYear}
+              onChange={(event) => {
+                setYear(Number(event.target.value));
+                setSelectedDay(null);
+                setDayDetail(null);
+              }}
+            >
+              {yearsApi.data.years.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
-      {contribution.loading ? (
+      {contribution.loading || yearsApi.loading ? (
         <p className="muted">Loading…</p>
-      ) : days.length === 0 ? (
-        <EmptyState
-          message={
-            view === "local"
-              ? "No local commit activity recorded yet."
-              : view === "github"
-                ? "No tracked GitHub commit activity yet."
-                : "No development activity recorded yet."
-          }
-          hint={
-            <span>
-              {view === "github"
-                ? "Track repositories and refresh them under Sources → Browse GitHub Repositories."
-                : "Commit something in a tracked project, then rescan."}
-            </span>
-          }
-        />
       ) : (
         <>
-          <section className="panel">
-            <h2>
-              <span className="h2-mark" aria-hidden="true" />
-              This month ·{" "}
-              {VIEWS.find((option) => option.id === view)?.label ?? view} source
-            </h2>
-            <p className="mono muted" style={{ marginTop: -4 }}>
-              {VIEWS.find((option) => option.id === view)?.blurb}
+          {totals != null ? (
+            <div className="contrib-stats" aria-label="Tracked commit statistics">
+              <div className="stat">
+                <span className="stat-num mono">{totals.commits}</span>
+                <span className="stat-label">tracked commits</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num mono">{totals.activeDays}</span>
+                <span className="stat-label">active days</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num mono">{totals.projects}</span>
+                <span className="stat-label">projects</span>
+              </div>
+            </div>
+          ) : null}
+
+          {dedup != null ? (
+            <p className="dedup-note mono muted">
+              Local observed {dedup.localObserved} · GitHub observed{" "}
+              {dedup.githubObserved} · overlap {dedup.overlap} collapsed ·{" "}
+              <strong>combined unique {dedup.combinedUnique}</strong>
             </p>
-            <ContributionCalendar
-              days={days}
-              selectedDay={selectedDay}
-              onSelectDay={(day) => void selectDay(day)}
+          ) : null}
+
+          {days.length === 0 ? (
+            <EmptyState
+              message={
+                view === "local"
+                  ? `No tracked local commits in ${activeYear}.`
+                  : view === "github"
+                    ? `No tracked GitHub commits in ${activeYear}.`
+                    : `No tracked commits in ${activeYear}.`
+              }
+              hint={
+                <span>
+                  {view === "github"
+                    ? "Track repositories and refresh them under Sources → Browse GitHub Repositories."
+                    : "Switch source or year, or commit something in a tracked project."}
+                </span>
+              }
             />
-          </section>
+          ) : (
+            <section className="panel">
+              <h2>
+                <span className="h2-mark" aria-hidden="true" />
+                {activeYear} ·{" "}
+                {VIEWS.find((option) => option.id === view)?.label ?? view} tracked
+                commits
+              </h2>
+              <p className="mono muted" style={{ marginTop: -4 }}>
+                {VIEWS.find((option) => option.id === view)?.blurb}
+              </p>
+              <ContributionCalendar
+                year={activeYear}
+                days={days}
+                selectedDay={selectedDay}
+                onSelectDay={(day) => void selectDay(day)}
+              />
+            </section>
+          )}
 
           {selectedDay ? (
             <section className="panel">
               <h2>
                 <span className="h2-mark" aria-hidden="true" />
-                {selectedDay} · {dayDetail?.totalCommits ?? "…"} commit(s)
+                {formatDayHeading(selectedDay)} ·{" "}
+                {dayDetail ? `${dayDetail.totalCommits} unique commit(s)` : "…"}
+                {dayDetail ? ` across ${dayDetail.projects.length} project(s)` : ""}
               </h2>
               {dayError ? <div className="error">{dayError}</div> : null}
               {!dayDetail ? (
@@ -128,15 +190,34 @@ export function ContributionsPage() {
                 <EmptyState message="No recorded activity for this day." />
               ) : (
                 dayDetail.projects.map((project) => (
-                  <div key={project.repositoryId} style={{ marginBottom: 12 }}>
-                    <Link className="list-link" to={`/projects/${project.repositoryId}`}>
-                      {project.projectName}
-                    </Link>
+                  <div key={project.repositoryId} style={{ marginBottom: 14 }}>
+                    <div className="day-project-head">
+                      <Link
+                        className="list-link"
+                        to={`/projects/${project.repositoryId}`}
+                      >
+                        {project.projectName}
+                      </Link>
+                      <span className={`pill neutral${project.source === "LOCAL + GITHUB" ? "" : ""}`}>
+                        {project.source}
+                      </span>
+                      <span className="mono muted">{project.commits.length} commit(s)</span>
+                    </div>
                     <ul className="day-commits">
                       {project.commits.map((commit) => (
-                        <li key={commit.sha}>
+                        <li key={`${commit.sha}-${String(commit.source)}`}>
                           <span className="mono">{shortSha(commit.sha)}</span> —{" "}
                           {commit.subject}
+                          <span className="mono muted">
+                            {" "}
+                            · {commit.source}
+                            {commit.committedAt
+                              ? ` · ${new Date(commit.committedAt).toLocaleTimeString(undefined, {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}`
+                              : ""}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -144,13 +225,13 @@ export function ContributionsPage() {
                 ))
               )}
               <p className="mono muted">
-                Source:{" "}
+                Source lens:{" "}
                 {view === "local"
-                  ? "local git observation"
+                  ? "LOCAL — local git observation"
                   : view === "github"
-                    ? "tracked GitHub repositories"
-                    : "local + tracked GitHub (duplicates collapsed)"}
-                {" · not a full GitHub profile graph"}
+                    ? "GITHUB — tracked GitHub repositories"
+                    : "COMBINED — duplicates counted once"}
+                {" · tracked commits only, not a full GitHub profile graph"}
               </p>
             </section>
           ) : null}
@@ -158,4 +239,14 @@ export function ContributionsPage() {
       )}
     </div>
   );
+}
+
+function formatDayHeading(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }

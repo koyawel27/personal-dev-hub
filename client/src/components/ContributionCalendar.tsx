@@ -2,15 +2,18 @@ import { useMemo } from "react";
 import type { ContributionDayDto } from "@shared/api-types";
 
 /**
- * Original contribution calendar: square micro-cells on a warm accent
- * scale reinforcing the pixel/grid language (plan section 8.3). Not a
- * visual clone of GitHub or LogBytes. Counts are commits — never hours.
+ * Year-long contribution calendar: GitHub-familiar interaction concept
+ * (52 weekday columns, month labels, Less→More legend, hover/click days)
+ * rendered in Personal Dev Hub's warm clay/amber workbench language.
+ * Not a visual clone; counts are commits — never hours.
  */
 export function ContributionCalendar({
+  year,
   days,
   selectedDay,
   onSelectDay,
 }: {
+  year: number;
   days: ContributionDayDto[];
   selectedDay: string | null;
   onSelectDay: (day: string | null) => void;
@@ -21,59 +24,88 @@ export function ContributionCalendar({
     return map;
   }, [days]);
 
-  const { weeks, monthLabel } = useMemo(() => buildMonth(new Date(), byDate), [byDate]);
   const max = useMemo(
     () => Math.max(1, ...days.map((day) => day.total)),
     [days],
   );
 
+  const { weeks, months } = useMemo(() => buildYear(year), [year]);
+
   function levelFor(total: number): number {
     if (total <= 0) return 0;
     if (total === 1) return 1;
     if (total <= Math.ceil(max / 2)) return 2;
-    return 3;
+    if (total <= Math.ceil((max * 3) / 4)) return 3;
+    return 4;
   }
 
   return (
     <div className="calendar">
-      <div className="calendar-head">
-        <span className="calendar-month">{monthLabel}</span>
-        <span className="calendar-legend mono">
-          <i className="cell l0" /> <i className="cell l1" /> <i className="cell l2" />{" "}
-          <i className="cell l3" />
-          <em>few → many</em>
-        </span>
-      </div>
-      <div className="calendar-grid" role="grid" aria-label="Contribution calendar">
-        {weeks.map((week, index) => (
-          <div className="calendar-week" key={index} role="row">
-            {week.map((cell) =>
-              cell ? (
-                <button
-                  key={cell.iso}
-                  type="button"
-                  role="gridcell"
-                  className={`cell l${levelFor(byDate.get(cell.iso)?.total ?? 0)} ${
-                    selectedDay === cell.iso ? "selected" : ""
-                  }`}
-                  title={`${cell.iso}: ${byDate.get(cell.iso)?.total ?? 0} commit(s)`}
-                  onClick={() =>
-                    onSelectDay(selectedDay === cell.iso ? null : cell.iso)
-                  }
-                  aria-label={`${cell.iso}, ${byDate.get(cell.iso)?.total ?? 0} commits`}
-                />
-              ) : (
-                <span className="cell blank" key={`blank-${index}-${String(cell)}`} />
-              ),
-            )}
+      <div className="yeargrid-scroll" role="region" aria-label={`${year} contribution grid`}>
+        <div className="yeargrid">
+          <div className="yeargrid-weekdays" aria-hidden="true">
+            <span>Mon</span>
+            <span>Wed</span>
+            <span>Fri</span>
           </div>
-        ))}
+          <div className="yeargrid-main">
+            <div className="yeargrid-months" aria-hidden="true">
+              {months.map((month) => (
+                <span key={month.key} className="yeargrid-month" style={{ gridColumnStart: month.column }}>
+                  {month.label}
+                </span>
+              ))}
+            </div>
+            <div
+              className="yeargrid-grid"
+              role="grid"
+              aria-label={`Tracked commits per day, ${year}`}
+            >
+              {weeks.map((week, weekIndex) => (
+                <div className="yeargrid-col" key={weekIndex} role="row">
+                  {week.map((cell) =>
+                    cell ? (
+                      <button
+                        key={cell.iso}
+                        type="button"
+                        role="gridcell"
+                        className={`cell l${levelFor(byDate.get(cell.iso)?.total ?? 0)} ${
+                          selectedDay === cell.iso ? "selected" : ""
+                        }`}
+                        title={`${formatLong(cell.iso)} · ${byDate.get(cell.iso)?.total ?? 0} tracked commit(s)`}
+                        onClick={() =>
+                          onSelectDay(selectedDay === cell.iso ? null : cell.iso)
+                        }
+                        aria-label={`${formatLong(cell.iso)}, ${byDate.get(cell.iso)?.total ?? 0} tracked commits`}
+                      />
+                    ) : (
+                      <span
+                        className="cell blank"
+                        key={`blank-${weekIndex}-${String(cell)}`}
+                        aria-hidden="true"
+                      />
+                    ),
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="calendar-legend mono">
+        <em>Less</em>
+        <i className="cell l0" />
+        <i className="cell l1" />
+        <i className="cell l2" />
+        <i className="cell l3" />
+        <i className="cell l4" />
+        <em>More</em>
       </div>
     </div>
   );
 }
 
-type Cell = { iso: string; day: number } | null;
+type Cell = { iso: string } | null;
 
 function isoDate(date: Date): string {
   const y = date.getFullYear();
@@ -82,36 +114,58 @@ function isoDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** Build a month grid (Monday-first weeks) for the current real month. */
-function buildMonth(anchor: Date, byDate: Map<string, ContributionDayDto>) {
-  const year = anchor.getFullYear();
-  const month = anchor.getMonth();
-  const first = new Date(year, month, 1);
-  const last = new Date(year, month + 1, 0);
-
-  const monthLabel = anchor.toLocaleDateString(undefined, {
-    month: "long",
+function formatLong(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
     year: "numeric",
   });
+}
 
-  // Only render the calendar when there is anything to show inside this month;
-  // otherwise still render an empty grid so the layout stays stable.
-  void byDate;
-
-  const lead = (first.getDay() + 6) % 7; // Monday-first offset
+/**
+ * Build a GitHub-style year grid: columns are weeks (Monday-first),
+ * rows are weekdays Mon..Sun. Also returns month label positions.
+ */
+function buildYear(year: number) {
   const weeks: Cell[][] = [];
-  let week: Cell[] = [];
-  for (let i = 0; i < lead; i += 1) week.push(null);
-  for (let day = 1; day <= last.getDate(); day += 1) {
-    week.push({ iso: isoDate(new Date(year, month, day)), day });
-    if (week.length === 7) {
-      weeks.push(week);
-      week = [];
+  const months: { key: string; label: string; column: number }[] = [];
+
+  // Start at the first Monday on/before Jan 1 so row alignment matches
+  // weekday references across the whole year.
+  const cursor = new Date(year, 0, 1);
+  cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7));
+
+  const end = new Date(year, 11, 31);
+  let lastMonthSeen = -1;
+  let weekIndex = 0;
+
+  while (cursor <= end || cursor.getDay() !== 2) {
+    // Fill columns until we pass Dec 31 and complete the current week
+    // (loop exits at the first Monday after year end).
+    if (cursor > end && cursor.getDay() === 1) break;
+    const column: Cell[] = [];
+    for (let i = 0; i < 7; i += 1) {
+      const inYear = cursor.getFullYear() === year;
+      if (inYear) {
+        if (cursor.getMonth() !== lastMonthSeen) {
+          lastMonthSeen = cursor.getMonth();
+          months.push({
+            key: `${year}-${lastMonthSeen}`,
+            label: cursor.toLocaleDateString(undefined, { month: "short" }),
+            column: weekIndex + 1,
+          });
+        }
+        column.push({ iso: isoDate(cursor) });
+      } else {
+        column.push(null);
+      }
+      cursor.setDate(cursor.getDate() + 1);
     }
+    weeks.push(column);
+    weekIndex += 1;
+    if (weeks.length > 60) break; // safety bound
   }
-  if (week.length > 0) {
-    while (week.length < 7) week.push(null);
-    weeks.push(week);
-  }
-  return { weeks, monthLabel };
+
+  return { weeks, months };
 }
