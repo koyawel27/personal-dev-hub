@@ -360,21 +360,48 @@ export async function trackGitHubRepository(input: {
   const fullName = `${resolvedOwner}/${resolvedName}`;
 
   return withTransaction(async () => {
-    const existing = db
+    // Identity lookup: normalized columns first, then case-insensitive raw
+    // columns so PRE-V1.1 enrichment rows (owner_norm/name_norm IS NULL)
+    // are found instead of colliding with UNIQUE(owner, name) on insert.
+    let existing = db
       .prepare(
         "SELECT id, project_id FROM github_repositories WHERE owner_norm = lower(?) AND name_norm = lower(?)",
       )
       .get(resolvedOwner, resolvedName) as
       | { id: number; project_id: number | null }
       | undefined;
-
-    if (existing?.project_id != null) {
-      throw new AppError(ErrorCodes.ALREADY_TRACKED, "That repository is already tracked.", 409);
+    if (existing == null) {
+      existing = db
+        .prepare(
+          "SELECT id, project_id FROM github_repositories WHERE lower(owner) = lower(?) AND lower(name) = lower(?)",
+        )
+        .get(resolvedOwner, resolvedName) as
+        | { id: number; project_id: number | null }
+        | undefined;
     }
 
     // Link-first: an existing local binding's remote identity wins so the
     // project becomes LOCAL + GITHUB without duplication.
     const match = findLocalMatch(fullName);
+
+    if (existing?.project_id != null) {
+      if (match != null && existing.project_id !== match.projectId) {
+        // Case D: the row belongs to a different curated project — never
+        // silently reassign; preserve both projects.
+        throw new AppError(
+          ErrorCodes.GITHUB_REPO_CONFLICT,
+          "That GitHub repository is already tracked under a different project.",
+          409,
+        );
+      }
+      // Case C: already linked (idempotent per approved API semantics).
+      throw new AppError(
+        ErrorCodes.ALREADY_TRACKED,
+        "That repository is already tracked.",
+        409,
+      );
+    }
+
     const projectId =
       match?.projectId ??
       Number(
@@ -383,13 +410,22 @@ export async function trackGitHubRepository(input: {
           .run(resolvedName, now, now).lastInsertRowid,
       );
 
-    let ghId: number;
+    let ghId: number = existing?.id ?? 0;
     if (existing) {
-      ghId = existing.id;
+      // Case B: ADOPT the existing cache/promotion candidate row. Guarded
+      // UPDATE only — the row id, its foreign-key history, and every cached
+      // field survive; COALESCE keeps old metadata unless fresh arrives.
       db.prepare(
         `UPDATE github_repositories SET
-           project_id = ?, tracked_at = ?, last_refreshed_at = ?,
-           full_name = ?, html_url = COALESCE(?, html_url),
+           project_id = ?,
+           tracked_at = ?,
+           last_refreshed_at = COALESCE(?, last_refreshed_at),
+           full_name = ?,
+           owner = ?,
+           name = ?,
+           owner_norm = lower(?),
+           name_norm = lower(?),
+           html_url = COALESCE(?, html_url),
            visibility = COALESCE(?, visibility),
            default_branch = COALESCE(?, default_branch),
            last_pushed_at = COALESCE(?, last_pushed_at)
@@ -399,13 +435,18 @@ export async function trackGitHubRepository(input: {
         now,
         now,
         fullName,
+        resolvedOwner,
+        resolvedName,
+        resolvedOwner,
+        resolvedName,
         metadata?.htmlUrl ?? null,
         metadata?.visibility ?? null,
         metadata?.defaultBranch ?? null,
         metadata?.lastPushedAt ?? null,
-        ghId,
+        existing.id,
       );
     } else {
+      // Case A: brand-new identity.
       const insert = db
         .prepare(
           `INSERT INTO github_repositories
