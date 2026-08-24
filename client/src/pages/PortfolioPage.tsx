@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { PortfolioItemDto } from "@shared/api-types";
 import { client } from "../api";
@@ -18,19 +19,55 @@ export function PortfolioPage() {
     [],
     { invalidateOn: ["portfolio", "projects"] },
   );
-  const projects = portfolio.data ?? [];
+  const [reorderBusyId, setReorderBusyId] = useState<number | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const raw = portfolio.data ?? [];
 
-  async function reorder(item: PortfolioItemDto, direction: -1 | 1) {
-    const ordered = projects.filter((entry) => entry.portfolioOrder != null);
-    const index = ordered.findIndex((entry) => entry.id === item.id);
-    const target = ordered[index + direction];
-    if (!target) return;
-    // Portfolio membership belongs to PROJECTS: mutate through project
-    // identity so GITHUB ONLY items work identically to local ones.
-    await client.updateProjectMetadata(item.id, { portfolioOrder: target.portfolioOrder });
-    await client.updateProjectMetadata(target.id, { portfolioOrder: item.portfolioOrder });
-    notifyMutations("portfolio", "projects");
-    await portfolio.refetch();
+  /**
+   * ONE canonical ordered collection used for rendering, button disabled
+   * states, AND reorder target resolution. The backend already returns
+   * portfolio_order ASC with un-ordered items appended by name; deriving a
+   * separate filtered list here previously desynchronized the handler from
+   * what the owner sees (items without an explicit order silently
+   * no-op'ed their move buttons).
+   */
+  const projects = [...raw].sort((a, b) => {
+    const ao = a.portfolioOrder;
+    const bo = b.portfolioOrder;
+    if (ao != null && bo != null && ao !== bo) return ao - bo;
+    if (ao != null) return -1;
+    if (bo != null) return 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+
+  async function reorder(item: PortfolioItemDto, direction: -1 | 1): Promise<void> {
+    // Resolve neighbors from THE SAME collection that is rendered.
+    const index = projects.findIndex((entry) => entry.id === item.id);
+    if (index === -1) return;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= projects.length) return;
+    const target = projects[targetIndex];
+    if (!target || target.id === item.id) return;
+
+    // Swap order values using Project identity. If the second update fails,
+    // refetch so the UI shows real server state instead of pretending the
+    // swap completed.
+    setReorderBusyId(item.id);
+    try {
+      await client.updateProjectMetadata(item.id, {
+        portfolioOrder: target.portfolioOrder ?? maxOrder(projects) + 1,
+      });
+      await client.updateProjectMetadata(target.id, {
+        portfolioOrder: item.portfolioOrder ?? maxOrder(projects) + 1,
+      });
+      notifyMutations("portfolio", "projects");
+      await portfolio.refetch();
+    } catch {
+      await portfolio.refetch().catch(() => undefined); // show true state
+      throw new Error("Reorder failed — the displayed order is unchanged.");
+    } finally {
+      setReorderBusyId(null);
+    }
   }
 
   async function removeFromPortfolio(item: PortfolioItemDto) {
@@ -48,6 +85,11 @@ export function PortfolioPage() {
         </div>
       </div>
       {portfolio.error ? <div className="error">{portfolio.error}</div> : null}
+      {reorderError ? (
+        <div className="error" role="alert">
+          {reorderError}
+        </div>
+      ) : null}
       {portfolio.loading ? (
         <p className="muted">Loading…</p>
       ) : projects.length === 0 ? (
@@ -90,22 +132,31 @@ export function PortfolioPage() {
                     <button
                       type="button"
                       aria-label={`Move ${item.name} up`}
-                      disabled={index === 0}
-                      onClick={() => void reorder(item, -1)}
+                      disabled={index === 0 || reorderBusyId != null}
+                      onClick={() =>
+                        void reorder(item, -1).catch((err: unknown) => {
+                          setReorderError(err instanceof Error ? err.message : "Reorder failed.");
+                        })
+                      }
                     >
                       ↑
                     </button>
                     <button
                       type="button"
                       aria-label={`Move ${item.name} down`}
-                      disabled={index >= orderedCount - 1}
-                      onClick={() => void reorder(item, 1)}
+                      disabled={index >= projects.length - 1 || reorderBusyId != null}
+                      onClick={() =>
+                        void reorder(item, 1).catch((err: unknown) => {
+                          setReorderError(err instanceof Error ? err.message : "Reorder failed.");
+                        })
+                      }
                     >
                       ↓
                     </button>
                     <button
                       type="button"
                       className="danger"
+                      disabled={reorderBusyId != null}
                       onClick={() => void removeFromPortfolio(item)}
                     >
                       Remove
@@ -119,4 +170,15 @@ export function PortfolioPage() {
       )}
     </div>
   );
+}
+
+/** Highest explicit portfolioOrder in the collection (fallback slot). */
+function maxOrder(items: PortfolioItemDto[]): number {
+  let max = 0;
+  for (const item of items) {
+    if (item.portfolioOrder != null && item.portfolioOrder > max) {
+      max = item.portfolioOrder;
+    }
+  }
+  return max;
 }
