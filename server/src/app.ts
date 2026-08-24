@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { AppError, ErrorCodes, toErrorBody } from "./lib/errors.js";
 import { parseNumericId } from "./lib/fsPaths.js";
 import { gitIsAvailable, resolveGitPath } from "./lib/gitRunner.js";
+import { getDb } from "./db/client.js";
 import { getGitHubStatus } from "./services/GitHubService.js";
 import {
   addSource,
@@ -14,7 +15,6 @@ import {
 import {
   addManualRepository,
   deleteRepository,
-  getDashboard,
   getRepositoryDetail,
   listActivity,
   listRepositories,
@@ -23,6 +23,7 @@ import {
   scanSource,
   updateMetadata,
 } from "./services/RepositoryService.js";
+import { getDashboard } from "./services/DashboardService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
 import {
   deriveSourceState,
@@ -38,7 +39,6 @@ import {
 } from "./services/ContributionService.js";
 import { buildPicker, refreshTrackedBinding } from "./services/GitHubPickerService.js";
 import { listPortfolio } from "./services/PortfolioService.js";
-import { githubOnlyCounts } from "./services/GitHubContributionsService.js";
 import {
   getDefaultScanDepth,
   setDefaultScanDepth,
@@ -281,28 +281,47 @@ export function createApp(): express.Express {
   app.get("/api/activity", (req, res, next) => {
     try {
       const repositoryIdRaw = req.query.repositoryId;
+      const projectIdRaw = req.query.projectId;
       const repositoryId =
         typeof repositoryIdRaw === "string" && repositoryIdRaw
           ? requireId(repositoryIdRaw, "repository")
           : undefined;
+      const projectId =
+        typeof projectIdRaw === "string" && projectIdRaw
+          ? requireId(projectIdRaw, "repository")
+          : undefined;
       const from = typeof req.query.from === "string" ? req.query.from : undefined;
       const to = typeof req.query.to === "string" ? req.query.to : undefined;
-      res.json({ activity: listActivity({ repositoryId, from, to }) });
+      // V1.1: a binding filter maps to its project's event stream so legacy
+      // clients keep seeing the full per-project journal.
+      let effectiveProjectId = projectId;
+      if (effectiveProjectId == null && repositoryId != null) {
+        const row = getDb()
+          .prepare("SELECT project_id FROM local_repositories WHERE id = ?")
+          .get(repositoryId) as { project_id: number | null } | undefined;
+        effectiveProjectId = row?.project_id ?? undefined;
+      }
+      res.json({
+        // When filtering through a binding's project, drop the binding
+        // filter: the journal is project-level (metadata events have no
+        // local binding attached).
+        activity: listActivity({ projectId: effectiveProjectId, from, to }),
+      });
     } catch (err) {
       next(err);
     }
   });
 
-  app.get("/api/contributions", async (req, res, next) => {
+  app.get("/api/contributions", (req, res, next) => {
     try {
       const from = typeof req.query.from === "string" ? req.query.from : null;
       const to = typeof req.query.to === "string" ? req.query.to : null;
-      // Optional enrichment: failure here degrades to Local-only labeling.
-      const githubOnly = await githubOnlyCounts(from, to);
-      res.json({
-        days: contributionDays(from, to, githubOnly ?? []),
-        source: githubOnly ? ("local+github" as const) : ("local" as const),
-      });
+      const rawView = typeof req.query.view === "string" ? req.query.view : "combined";
+      const view =
+        rawView === "local" || rawView === "github" || rawView === "combined"
+          ? rawView
+          : "combined";
+      res.json({ days: contributionDays(from, to, view), source: view });
     } catch (err) {
       next(err);
     }
@@ -310,7 +329,12 @@ export function createApp(): express.Express {
 
   app.get("/api/contributions/:day", (req, res, next) => {
     try {
-      res.json(dailyDetail(req.params.day));
+      const rawView = typeof req.query.view === "string" ? req.query.view : "combined";
+      const view =
+        rawView === "local" || rawView === "github" || rawView === "combined"
+          ? rawView
+          : "combined";
+      res.json(dailyDetail(req.params.day, view));
     } catch (err) {
       next(err);
     }

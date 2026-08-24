@@ -26,12 +26,16 @@ async function track(name: string): Promise<{ id: number }> {
   cleanup.push(repo);
   const res = await request(app).post("/api/repositories/manual").send({ path: repo });
   expect(res.status).toBe(201);
-  const id = res.body.repository.id as number;
+  const repositoryId = res.body.repository.id as number;
+  // V1.1: metadata lives on the Project; resolve its id from the binding.
+  const detail = await request(app).get(`/api/repositories/${repositoryId}`);
+  const projectId = detail.body.repository.projectId as number;
+  expect(projectId).toBeTruthy();
   await request(app)
-    .patch(`/api/repositories/${id}/metadata`)
+    .patch(`/api/projects/${projectId}/metadata`)
     .send({ projectNote: `${name} note` })
     .expect(200);
-  return { id };
+  return { id: projectId };
 }
 
 describe("Portfolio endpoint", () => {

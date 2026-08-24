@@ -1,4 +1,4 @@
-import type { EventType } from "../../../shared/api-types.js";
+import type { ActivityEventDto, EventType } from "../../../shared/api-types.js";
 import { getDb } from "../db/client.js";
 import type { GitInspection } from "./GitService.js";
 
@@ -142,6 +142,77 @@ export function persistActivityEvents(
     throw new Error(`Repository ${repositoryId} has no project mapping.`);
   }
   persistActivityEventsDirect(row.project_id, events, repositoryId);
+}
+
+/**
+ * Project-aware activity feed (V1.1). Events belong to projects; the
+ * project name resolves through the owning project (falling back to the
+ * binding name for pre-004 rows), and GitHub-origin events appear alongside
+ * local ones. Optional filters: projectId, repositoryId, date range.
+ */
+export function listActivity(filters: {
+  projectId?: number;
+  repositoryId?: number;
+  from?: string;
+  to?: string;
+}): ActivityEventDto[] {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  if (filters.projectId != null) {
+    clauses.push("e.project_id = ?");
+    params.push(filters.projectId);
+  }
+  if (filters.repositoryId != null) {
+    clauses.push("e.local_repository_id = ?");
+    params.push(filters.repositoryId);
+  }
+  if (filters.from) {
+    clauses.push("e.occurred_at >= ?");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    clauses.push("e.occurred_at <= ?");
+    params.push(filters.to);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         e.id,
+         e.local_repository_id,
+         e.project_id,
+         COALESCE(p.name, lr.name, '(unknown)') AS project_name,
+         e.event_type,
+         e.summary,
+         e.occurred_at,
+         e.source
+       FROM activity_events e
+       LEFT JOIN local_repositories lr ON lr.id = e.local_repository_id
+       LEFT JOIN projects p ON p.id = COALESCE(e.project_id, lr.project_id)
+       ${where}
+       ORDER BY e.occurred_at DESC, e.id DESC
+       LIMIT 200`,
+    )
+    .all(...params) as Array<{
+    id: number;
+    local_repository_id: number | null;
+    project_id: number | null;
+    project_name: string | null;
+    event_type: EventType;
+    summary: string;
+    occurred_at: string;
+    source: string;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id ?? 0,
+    localRepositoryId: row.local_repository_id ?? 0,
+    projectName: row.project_name ?? "(unknown)",
+    eventType: row.event_type,
+    summary: row.summary,
+    occurredAt: row.occurred_at,
+    source: row.source,
+  }));
 }
 
 /**

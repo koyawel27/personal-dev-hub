@@ -37,9 +37,12 @@ export type ContributionDayDto = {
   total: number;
   /** Portion contributed by local Git observation. */
   localCount: number;
-  /** Portion contributed by GitHub enrichment only (not already local). */
+  /** Portion contributed by tracked GitHub bindings (not already local). */
   githubCount: number;
 };
+
+/** Contribution aggregation view (V1.1): honest per-source lenses. */
+export type ContributionView = "local" | "github" | "combined";
 
 export type DailyProjectCommits = {
   repositoryId: number;
@@ -51,6 +54,10 @@ export type DailyDetailResponse = {
   date: string;
   /** Distinct commit SHAs for the day across all projects. */
   totalCommits: number;
+  /** Which lens produced this response. */
+  view: ContributionView;
+  /** Present when view=combined and some GitHub data was unavailable. */
+  partial?: boolean;
   projects: DailyProjectCommits[];
 };
 
@@ -58,12 +65,17 @@ export type DailyDetailResponse = {
 export type PortfolioItemDto = {
   id: number;
   name: string;
+  sourceState: SourceState;
   projectType: ProjectType | null;
   projectStatus: ProjectStatus | null;
   projectNote: string | null;
   githubHtmlUrl: string | null;
   portfolioOrder: number | null;
-  /** Honest manifest-derived hints; empty when nothing recognizable. */
+  /**
+   * Honest hints only: local manifest probes, plus GitHub's reported
+   * primary language for GitHub-only items (explicitly GitHub metadata,
+   * not a stack analysis — owner decision Q4).
+   */
   technologyHints: string[];
   firstCommitAt: string | null;
   latestCommitAt: string | null;
@@ -92,13 +104,15 @@ export type SourceState = "LOCAL + GITHUB" | "LOCAL ONLY" | "GITHUB ONLY";
 export type RecentlyActiveProjectDto = {
   id: number;
   name: string;
+  sourceState: SourceState;
   projectStatus: ProjectStatus | null;
   projectType: ProjectType | null;
   branch: string | null;
-  workingTree: "Clean" | "Uncommitted";
+  workingTree: "Clean" | "Uncommitted" | "Unavailable";
   sync: string;
   githubConnected: boolean;
-  localPath: string;
+  /** Primary local copy path; null for GITHUB ONLY projects. */
+  localPath: string | null;
   /** Time of the most recent meaningful activity event, if any. */
   lastMeaningfulAt: string | null;
   latestCommitSubject: string | null;
@@ -198,6 +212,8 @@ export type SnapshotDto = {
 
 export type RepositoryListItem = {
   id: number;
+  /** Owning project id (V1.1: metadata lives on the Project). */
+  projectId: number | null;
   name: string;
   localPath: string;
   canonicalPath: string;
@@ -227,6 +243,8 @@ export type RepositoryDetail = RepositoryListItem & {
 
 export type ActivityEventDto = {
   id: number;
+  /** Owning project id (0 only for legacy unlinked rows). */
+  projectId: number;
   localRepositoryId: number;
   projectName: string;
   eventType: EventType;
