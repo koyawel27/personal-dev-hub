@@ -33,7 +33,9 @@ export function ProjectDetailPage() {
     setProject(detail.project);
     // Resolve the primary local binding (if any) for local actions.
     const repos = await client.repositories();
-    const binding = repos.repositories.find((repo) => repo.projectId === id);
+    const binding = repos.repositories.find(
+      (repo) => repo.projectId === id && repo.id != null,
+    );
     setBindingRepoId(binding?.id ?? null);
     const events = await client.activity({ projectId: id });
     setActivity(events.activity);

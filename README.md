@@ -49,21 +49,22 @@ npm run build
 
 | Area | Behavior |
 | --- | --- |
-| Dashboard | Real summary metrics (tracked/active projects, commits this week, active days, uncommitted repositories), recently active projects derived from meaningful activity, contribution preview, recent activity journal, needs-attention list |
-| Projects | Dense workspace of tracked repositories with manual status (Active/Paused/Finished/Archived/Experiment), type (Personal/School/OJT/Client/Experiment/Other), short note, portfolio flag; filters for uncommitted/ahead/behind/GitHub/local/portfolio |
-| Project Detail | Logbook-style overview with metadata editor, repository state, changed files (read-only), remotes, GitHub metadata, bounded commit history, per-project activity |
-| Activity | Global development journal built from fingerprinted events; unchanged rescans add nothing |
-| Contributions | Original activity calendar from locally observed commits with day drill-down; optional GitHub-only commits merged by SHA so nothing counts twice; counts are commits, never hours |
-| Portfolio | Selected-work view generated from tracked data: notes, type/status, technology hints (from manifest files), first/latest known commit dates, simple ordering |
-| Sources | Multiple scan roots with depth control and heavy-folder skipping, plus manual add of individual repositories |
-| Settings | Git executable status, GitHub CLI status, default scan depth, app data location, rescan controls |
+| Dashboard | Real summary metrics (tracked/active projects, commits this week from local + tracked GitHub sources, active days, uncommitted repositories), recently active projects derived from meaningful activity (local or GitHub), contribution preview, recent activity journal, needs-attention list (local conditions only) |
+| Projects | Project-centric workspace where each project carries an explicit source badge — LOCAL + GITHUB, LOCAL ONLY, or GITHUB ONLY — with manual status/type/note/portfolio metadata owned by the project; dense table with search and filters |
+| GitHub tracking | Curated picker under Sources → Browse GitHub Repositories: search plus Owned/Collaborator/Organization/Public/Private/Archived/Forks/Tracked/Untracked filters; explicit selection only; picking a repository that matches a local clone's remote links them into one project instead of duplicating it; tracking never clones |
+| Project Detail | Source-aware logbook: local state (branch, working tree, changed files) when a local copy exists; GitHub identity, visibility, default branch, last push for linked repositories; bounded commit history tagged by source; per-project activity journal |
+| Activity | Global development journal built from fingerprinted events across both origins (commit observed, working-tree transitions, branch changes, GitHub repo tracked/untracked); unchanged rescans and no-op refreshes add nothing |
+| Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (duplicates collapsed by repository identity + SHA); counts are commits, never hours; not a full GitHub profile graph |
+| Portfolio | Selected-work view over projects: notes, type/status, technology hints (manifest probes, or GitHub's reported primary language for GitHub-only items), first/latest known commit dates, simple ordering. GitHub-only projects are eligible without a local clone |
+| Sources | Multiple scan roots with depth control and heavy-folder skipping, manual add of individual repositories, and the GitHub repository picker |
+| Settings | Git executable status, GitHub connection summary (CLI installed / account connected via your existing `gh` login), default scan depth, app data location, rescan controls |
 
 ## Privacy behavior
 
-- Only metadata is stored: paths, branches, file counts, commit subjects/authors/timestamps, remotes, activity events, and your own notes.
+- Only metadata is stored: paths, branches, file counts, commit subjects/authors/timestamps, remotes, activity events, cached GitHub repository facts, and your own notes.
 - No source code, diffs, secrets, or terminal history are copied into the app database.
-- GitHub personal access tokens are never stored; enrichment uses your existing `gh` authentication.
-- Removing a repository from the app never touches the files on disk.
+- GitHub personal access tokens are never stored; listing and refresh use your existing `gh` authentication through a fixed allow-list of read-only operations.
+- Removing a repository from the app never touches the files on disk; untracking a GitHub repository never touches GitHub.
 
 ## Data location
 
@@ -73,8 +74,10 @@ Everything persists in `data/dashboard.sqlite` inside the project folder (overri
 
 - Single user, single machine, desktop-first layout.
 - Ahead/behind is computed from remote-tracking refs already on disk — the app never fetches, so sync state is only as fresh as your own git usage.
-- Contribution calendar shows the current month; ranges beyond the most recent ~100 commits per GitHub repository require the local scan to have seen them.
-- No notifications, background watching, AI features, or team/corporate anything — by design.
+- GitHub-side commits are stored for tracked repositories after a manual refresh (bounded to the most recent ~100 per repository); the GitHub view of Contributions covers exactly that data.
+- Contributions shows the current month; it is not a replication of GitHub's full profile contribution graph.
+- A project has at most one GitHub binding in V1.1; multiple local copies per project are supported structurally (the first registered copy is treated as primary).
+- No notifications, background watching/sync daemon, OAuth, cloning, AI features, or team/corporate anything — by design.
 
 ## Disposable test repository
 
