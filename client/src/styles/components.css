@@ -375,15 +375,23 @@ button:disabled {
 }
 
 /* ---------- Sources tables (scan locations + individual repositories) ----------
-   Compact single-row layout on desktop. Column priority when space tightens:
-   Path shrinks first (ellipsis), then Project; Added-as and Actions stay
-   non-wrapping so buttons never stack while desktop width remains. */
+   Compact single-row layout on desktop. Column model: Path is the flexible
+   filler — it consumes ALL remaining width after Project / depth-date-count /
+   added-as / Actions take their intrinsic (max-content) sizes, and only
+   ellipses when a real path exceeds that remainder. Non-Path columns never
+   wrap, so buttons stay side-by-side while desktop width remains. */
 
 .sources-table .cell-path {
-  /* Auto-table truncation trick: max-width 0 tells the column algorithm the
-     path claims no width, so name/added/actions get theirs FIRST and the
-     path column receives whatever remains — ellipsing instead of wrapping. */
-  max-width: 0;
+  /* width:100% on these cells sets the Path COLUMN's used-width preference
+     to the whole table. Auto layout still pays out every other column's
+     max-content first, so the effect is "Path gets the entire leftover",
+     not "Path gets a share of it". (The previous max-width:0 trick zeroed
+     the column's preferred width, so leftover space was split across
+     columns and short paths collapsed to a few characters even with room
+     to spare.) Deliberately NOT a positional th selector: the two tables
+     put Path in different column positions, and body cells already carry
+     the column-level percentage preference. */
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
