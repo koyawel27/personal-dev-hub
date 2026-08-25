@@ -8,8 +8,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/tests/**/*.test.ts", "server/tests/**/*.test.tsx"],
-    testTimeout: 20_000,
-    hookTimeout: 20_000,
+    // Git-heavy fixtures (real repo creation per test) are CPU/disk-bound
+    // and this host runs the suite near its limits; the previous 20s
+    // ceiling produced nondeterministic timeouts under sustained load.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     fileParallelism: false,
   },
   resolve: {

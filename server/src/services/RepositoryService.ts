@@ -5,6 +5,7 @@ import type {
   ActivityEventDto,
   CommitDto,
   DashboardResponse,
+  DeleteLocalBindingResponse,
   GitHubMetadataDto,
   RemoteDto,
   RepositoryDetail,
@@ -38,7 +39,10 @@ import {
   listActivity as listActivityProjectAware,
   type PreviousSnapshot,
 } from "./ActivityService.js";
-import { updateProjectMetadata } from "./ProjectService.js";
+import {
+  finalizeProjectAfterFinalBindingRemoval,
+  updateProjectMetadata,
+} from "./ProjectService.js";
 import { fetchGitHubRepoMetadata } from "./GitHubService.js";
 import { inspectRepository, isRepository, type GitInspection } from "./GitService.js";
 import {
@@ -872,9 +876,37 @@ export async function addManualRepository(input: { path: unknown }): Promise<Rep
   });
 }
 
-export function deleteRepository(id: number): void {
-  getRepoRow(id);
-  getDb().prepare("DELETE FROM local_repositories WHERE id = ?").run(id);
+/**
+ * Remove a local binding ("Remove from dashboard" / Sources row Remove).
+ * The filesystem folder is NEVER touched — this deletes a database row.
+ *
+ * Q1 invariant applies to the owning Project exactly like GitHub untrack:
+ * - another binding remains -> project survives unchanged;
+ * - final binding + empty project -> project auto-deletes;
+ * - final binding + meaningful state -> refuses with PROJECT_HAS_NO_SOURCES
+ *   so the client can ask keep-or-delete before destroying the Project.
+ */
+export function deleteRepository(
+  id: number,
+  options: { confirmDeleteProject?: boolean } = {},
+): DeleteLocalBindingResponse {
+  const repo = getRepoRow(id);
+  const projectId = repo.project_id;
+  if (projectId == null) {
+    // Pre-004 legacy row without a project mapping: remove the binding only.
+    getDb().prepare("DELETE FROM local_repositories WHERE id = ?").run(id);
+    return { ok: true, projectDeleted: false };
+  }
+  return withTransaction(() => {
+    getDb().prepare("DELETE FROM local_repositories WHERE id = ?").run(id);
+    // Binding-level snapshots/commits/remotes cascade with the FK; events
+    // survive as project-scoped rows and count toward meaningfulness below.
+    return {
+      ok: true,
+      projectDeleted: finalizeProjectAfterFinalBindingRemoval(projectId, options)
+        .projectDeleted,
+    };
+  });
 }
 
 const METADATA_ERROR =

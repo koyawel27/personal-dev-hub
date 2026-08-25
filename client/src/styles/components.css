@@ -626,6 +626,12 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.source-badge.state-no-source {
+  color: #8a4a4a;
+  border-color: #d6b3b3;
+  background: rgba(138, 74, 74, 0.08);
+}
+
 .source-badge.state-github-only {
   color: #4e607a;
   border-color: #b3c2d6;

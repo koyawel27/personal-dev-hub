@@ -5,6 +5,7 @@ import { notifyMutations } from "../lib/mutations";
 import type { ActivityEventDto, ProjectDetailDto } from "@shared/api-types";
 import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
 import { ApiError, client } from "../api";
+import { removeLocalBinding } from "../lib/removeLocalBinding";
 import { StatusBadge } from "../components/Badge";
 import { MetadataEditor } from "../components/MetadataEditor";
 import { SourceBadge } from "../components/SourceBadge";
@@ -342,8 +343,15 @@ export function ProjectDetailPage() {
                     if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
                       return;
                     }
-                    await client.deleteRepository(bindingRepoId!);
-                    navigate("/projects");
+                    const result = await removeLocalBinding(bindingRepoId!);
+                    // Reconcile every view first; if the project auto-deleted,
+                    // this route no longer exists and we leave it cleanly.
+                    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+                    if (result.projectDeleted) {
+                      navigate("/projects", { replace: true });
+                      return;
+                    }
+                    await load();
                   })
                 }
               >

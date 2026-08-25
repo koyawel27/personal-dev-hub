@@ -126,8 +126,17 @@ export type EventType =
   | "github_commit_observed"
   | "github_binding_updated";
 
-/** First-class source composition of a Project (derived, never stored). */
-export type SourceState = "LOCAL + GITHUB" | "LOCAL ONLY" | "GITHUB ONLY";
+/** First-class source composition of a Project (derived, never stored).
+ *  "NO SOURCE" is transient-only (mid-transaction or pre-repair ghosts);
+ *  it must never be persisted as a resting user-facing state. */
+export type SourceState = "LOCAL + GITHUB" | "LOCAL ONLY" | "GITHUB ONLY" | "NO SOURCE";
+
+/** Response for removing a local repository binding (dashboard row). */
+export type DeleteLocalBindingResponse = {
+  ok: true;
+  /** True when the owning Project record was removed (final binding, empty). */
+  projectDeleted: boolean;
+};
 
 /** Compact per-project summary used by Dashboard "Recently Active". */
 export type RecentlyActiveProjectDto = {

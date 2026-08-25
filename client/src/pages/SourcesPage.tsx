@@ -5,6 +5,7 @@ import { EMPTY_STATES } from "@shared/status-terms";
 import { ApiError, client } from "../api";
 import { formatDateTime } from "../format";
 import { GithubPickerSection } from "../components/GithubPicker";
+import { removeLocalBinding } from "../lib/removeLocalBinding";
 import { useInvalidate } from "../useApi";
 import { notifyMutations } from "../lib/mutations";
 
@@ -227,7 +228,12 @@ export function SourcesPage() {
                       disabled={busy}
                       onClick={() =>
                         run(async () => {
-                          await client.deleteRepository(repo.id);
+                          const result = await removeLocalBinding(repo.id);
+                          if (result.projectDeleted) {
+                            setNotice(
+                              "Removed from dashboard. The project had no other sources and no meaningful state, so its record was cleaned up.",
+                            );
+                          }
                         })
                       }
                     >

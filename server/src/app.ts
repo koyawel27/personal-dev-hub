@@ -177,8 +177,12 @@ export function createApp(): express.Express {
 
   app.delete("/api/repositories/:id", (req, res, next) => {
     try {
-      deleteRepository(requireId(req.params.id, "repository"));
-      res.json({ ok: true });
+      // Q1 lifecycle for the local binding's owning Project: empty projects
+      // auto-delete, meaningful ones refuse pending explicit confirmation.
+      const confirmDeleteProject = req.query.confirmDeleteProject === "true";
+      res.json(
+        deleteRepository(requireId(req.params.id, "repository"), { confirmDeleteProject }),
+      );
     } catch (err) {
       next(err);
     }

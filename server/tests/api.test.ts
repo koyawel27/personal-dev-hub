@@ -160,8 +160,15 @@ describe("API validation and persistence", () => {
     const app = createApp();
     const created = await request(app).post("/api/repositories/manual").send({ path: repo });
     const id = created.body.repository.id as number;
-    const removed = await request(app).delete(`/api/repositories/${id}`);
+    // The fresh repo carries one commit -> meaningful history -> the Q1
+    // guard refuses to destroy the Project without explicit confirmation.
+    const refused = await request(app).delete(`/api/repositories/${id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe("PROJECT_HAS_NO_SOURCES");
+    // Confirmed removal proceeds; the filesystem folder is still untouched.
+    const removed = await request(app).delete(`/api/repositories/${id}?confirmDeleteProject=true`);
     expect(removed.status).toBe(200);
+    expect(removed.body.projectDeleted).toBe(true);
     expect(fs.existsSync(path.join(repo, "README.md"))).toBe(true);
   });
 

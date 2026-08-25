@@ -4,6 +4,7 @@ import type {
   ContributionDayDto,
   DailyDetailResponse,
   DashboardResponse,
+  DeleteLocalBindingResponse,
   GitHubStatusDto,
   HealthResponse,
   PortfolioItemDto,
@@ -81,8 +82,11 @@ export const client = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  deleteRepository: (id: number) =>
-    api<{ ok: true }>(`/api/repositories/${id}`, { method: "DELETE" }),
+  deleteRepository: (id: number, confirmDeleteProject?: boolean) =>
+    api<DeleteLocalBindingResponse>(
+      `/api/repositories/${id}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
+      { method: "DELETE" },
+    ),
   open: (id: number, action: "folder" | "terminal" | "vscode" | "github") =>
     api<{ ok: true }>(`/api/repositories/${id}/open/${action}`, { method: "POST" }),
   activity: (params?: { repositoryId?: number; projectId?: number; from?: string; to?: string }) => {

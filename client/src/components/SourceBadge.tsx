@@ -4,6 +4,7 @@ const CLASS_BY_STATE: Record<SourceState, string> = {
   "LOCAL + GITHUB": "state-local-github",
   "LOCAL ONLY": "state-local-only",
   "GITHUB ONLY": "state-github-only",
+  "NO SOURCE": "state-no-source",
 };
 
 /**

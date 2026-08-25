@@ -146,7 +146,9 @@ function derivePortfolioState(
   hasLocal: boolean,
   hasGithub: boolean,
 ): PortfolioItemDto["sourceState"] {
+  // Portfolio items are include_in_portfolio projects; a NO SOURCE item can
+  // only be a pre-repair ghost, never a resting state (Q1 invariant).
   if (hasLocal && hasGithub) return "LOCAL + GITHUB";
   if (hasLocal) return "LOCAL ONLY";
-  return "GITHUB ONLY";
+  return hasGithub ? "GITHUB ONLY" : "NO SOURCE";
 }

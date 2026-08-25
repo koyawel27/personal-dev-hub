@@ -230,11 +230,13 @@ export function getDashboard(): DashboardResponse {
 }
 
 function deriveSourceStateFor(
-  projectId: number,
+  _projectId: number,
   hasLocal: boolean,
   hasGithub: boolean,
 ): SourceState {
+  // Explicit both-bindings test: zero + zero must serialize as NO SOURCE,
+  // never masquerade as GitHub-backed (Q1 invariant).
   if (hasLocal && hasGithub) return "LOCAL + GITHUB";
   if (hasLocal) return "LOCAL ONLY";
-  return "GITHUB ONLY";
+  return hasGithub ? "GITHUB ONLY" : "NO SOURCE";
 }

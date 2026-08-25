@@ -113,7 +113,43 @@ export function deriveSourceState(projectId: number): SourceState {
   const locals = localBindingCount(projectId);
   if (locals > 0 && gh != null) return "LOCAL + GITHUB";
   if (locals > 0) return "LOCAL ONLY";
-  return "GITHUB ONLY";
+  // Zero-binding Projects must never masquerade as GitHub-backed. The
+  // resting NO SOURCE state is itself an invariant violation; it exists
+  // only transiently mid-transaction or on pre-repair ghost rows (see
+  // migration 007), and the lifecycle closes it automatically.
+  return gh != null ? "GITHUB ONLY" : "NO SOURCE";
+}
+
+/**
+ * Shared final-binding removal lifecycle (Q1 invariant, applied uniformly
+ * to BOTH source kinds). Call inside a transaction AFTER the binding has
+ * been detached/removed.
+ *
+ * - another binding remains -> project survives, nothing to do;
+ * - no bindings + empty project -> auto-delete (cascade removes history);
+ * - no bindings + meaningful state -> refuses with PROJECT_HAS_NO_SOURCES
+ *   so the client can ask keep-or-delete before destroying the Project.
+ *   confirmDeleteProject=true is that explicit owner decision and bypasses
+ *   the refusal (accepted GitHub-untrack semantics).
+ *
+ * Never touches the filesystem or GitHub: bindings are database rows only.
+ */
+export function finalizeProjectAfterFinalBindingRemoval(
+  projectId: number,
+  options: { confirmDeleteProject?: boolean } = {},
+): { projectDeleted: boolean } {
+  if (localBindingCount(projectId) > 0 || githubBindingForProject(projectId) != null) {
+    return { projectDeleted: false };
+  }
+  if (!projectHasMeaningfulState(projectId) || options.confirmDeleteProject === true) {
+    deleteProjectCascade(projectId);
+    return { projectDeleted: true };
+  }
+  throw new AppError(
+    ErrorCodes.PROJECT_HAS_NO_SOURCES,
+    "This project has notes/status/portfolio state/history. Confirm deletion.",
+    409,
+  );
 }
 
 export function githubMetadataForProject(projectId: number): GitHubMetadataDto | null {
@@ -543,21 +579,26 @@ export async function untrackGitHubRepository(input: {
       return { ok: true as const, projectDeleted: false };
     }
 
-    // GITHUB ONLY -> project loses its only binding.
-    if (!input.confirmDeleteProject && projectHasMeaningfulState(projectId)) {
-      throw new AppError(
-        ErrorCodes.PROJECT_HAS_NO_SOURCES,
-        "This project has notes/status/portfolio state/history. Confirm deletion.",
-        409,
-      );
-    }
-    deleteProjectCascade(projectId);
-    return { ok: true as const, projectDeleted: true };
+    // GITHUB ONLY -> project loses its only binding. Same Q1 lifecycle as
+    // local removal: empty auto-deletes, meaningful refuses without an
+    // explicit confirmation (which bypasses the refusal, owner decided).
+    return {
+      ok: true as const,
+      projectDeleted: finalizeProjectAfterFinalBindingRemoval(projectId, {
+        confirmDeleteProject: input.confirmDeleteProject,
+      }).projectDeleted,
+    };
   });
 }
 
 /**
  * Q1 emptiness proof: auto-delete only when provably no meaningful state.
+ *
+ * Meaningful = user-curated metadata, real history (local or GitHub
+ * commits), or a non-routine activity event. Routine bookkeeping events —
+ * repository_discovered plus tracked/untracked lifecycle markers — do NOT
+ * make an otherwise empty Project immortal: they are system observations,
+ * not owner-authored content.
  */
 export function projectHasMeaningfulState(projectId: number): boolean {
   const db = getDb();
@@ -596,11 +637,16 @@ export function projectHasMeaningfulState(projectId: number): boolean {
         )
         .get(projectId, projectId) as { n: number }
     ).n > 0;
+  // Non-meaningful event types (owner decision): routine system bookkeeping.
+  // github_binding_updated is included defensively so a future emitter can
+  // never accidentally freeze Projects against their lifecycle.
   const events =
     (
       db
         .prepare(
-          "SELECT COUNT(*) AS n FROM activity_events WHERE project_id = ? AND event_type NOT IN ('github_repo_tracked','github_repo_untracked')",
+          `SELECT COUNT(*) AS n FROM activity_events WHERE project_id = ?
+           AND event_type NOT IN ('repository_discovered','github_repo_tracked',
+                                  'github_repo_untracked','github_binding_updated')`,
         )
         .get(projectId) as { n: number }
     ).n > 0;
