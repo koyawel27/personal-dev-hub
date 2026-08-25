@@ -5,6 +5,7 @@ import type {
   DailyDetailResponse,
   DashboardResponse,
   DeleteLocalBindingResponse,
+  FolderSelectionResponse,
   GitHubStatusDto,
   HealthResponse,
   PortfolioItemDto,
@@ -61,6 +62,8 @@ export const client = {
     }),
   deleteSource: (id: number) =>
     api<{ ok: true }>(`/api/sources/${id}`, { method: "DELETE" }),
+  selectFolder: () =>
+    api<FolderSelectionResponse>("/api/system/select-folder", { method: "POST" }),
   scanSource: (id: number) =>
     api<{ summary: ScanSummary }>(`/api/sources/${id}/scan`, { method: "POST" }),
   scanAll: () => api<{ summary: ScanSummary }>("/api/scans", { method: "POST" }),

@@ -407,6 +407,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* Timestamps render as "8/25/2026, 1:05:42 PM": never let them break into
+   multiple lines — Path truncates first instead (column model above). */
+.sources-table .cell-last-scan {
+  white-space: nowrap;
+}
+
 .sources-table td.row-actions {
   flex-wrap: nowrap;
   white-space: nowrap;
@@ -590,6 +596,10 @@ button:disabled {
 .hint-text {
   font-size: 11px;
   color: var(--text-faint);
+}
+
+.hint-text.danger {
+  color: var(--danger);
 }
 
 /* ---------- source-state badges (V1.1) ---------- */

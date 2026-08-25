@@ -25,6 +25,7 @@ import {
 } from "./services/RepositoryService.js";
 import { getDashboard } from "./services/DashboardService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
+import { selectFolder } from "./services/FolderPickerService.js";
 import {
   deriveSourceState,
   getProjectDetail,
@@ -283,6 +284,17 @@ export function createApp(): express.Express {
     } catch (err) {
       next(err);
     }
+  });
+
+  // Native folder selection for the Sources path inputs. Parameterless by
+  // design: nothing from the request can shape the executed command, and
+  // the dialog is pure UI — no source configuration is touched. The server
+  // binds to 127.0.0.1 (local-first app), so this surface is only reachable
+  // from the owner's machine; it never deletes/moves/creates anything.
+  app.post("/api/system/select-folder", (_req, res, next) => {
+    selectFolder()
+      .then((outcome) => res.json(outcome))
+      .catch(next);
   });
 
   app.get("/api/activity", (req, res, next) => {

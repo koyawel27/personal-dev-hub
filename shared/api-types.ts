@@ -138,6 +138,13 @@ export type DeleteLocalBindingResponse = {
   projectDeleted: boolean;
 };
 
+/** Native folder-picker result. Cancellation is a normal, non-error outcome. */
+export type FolderSelectionResponse = {
+  selected: boolean;
+  /** Absolute folder path when selected; null on cancellation or absence. */
+  path: string | null;
+};
+
 /** Compact per-project summary used by Dashboard "Recently Active". */
 export type RecentlyActiveProjectDto = {
   id: number;

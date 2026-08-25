@@ -18,6 +18,36 @@ export function SourcesPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Native folder-picker request state (shared by both Browse buttons so
+  // rapid clicks can never stack two OS dialogs).
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+
+  /**
+   * Open the backend's native folder dialog and pour the chosen absolute
+   * path into the given field. Cancel is silent and changes nothing;
+   * failures leave the field value intact with a restrained message.
+   * Never auto-submits — the owner reviews the path, then clicks Add.
+   */
+  async function browseFolder(apply: (value: string) => void) {
+    if (pickerBusy) return;
+    setPickerBusy(true);
+    setPickerError(null);
+    try {
+      const outcome = await client.selectFolder();
+      if (outcome.selected && outcome.path != null) {
+        apply(outcome.path);
+      }
+    } catch (err: unknown) {
+      setPickerError(
+        err instanceof ApiError
+          ? `Folder browser unavailable: ${err.message}`
+          : "Folder browser unavailable.",
+      );
+    } finally {
+      setPickerBusy(false);
+    }
+  }
 
   async function reload() {
     const [sourceData, repoData] = await Promise.all([client.sources(), client.repositories()]);
@@ -83,6 +113,11 @@ export function SourcesPage() {
       </div>
       {error ? <div className="error">{error}</div> : null}
       {notice ? <div className="notice">{notice}</div> : null}
+      {pickerError ? (
+        <p className="hint-text danger" role="status">
+          {pickerError} You can still type or paste a path manually.
+        </p>
+      ) : null}
 
       <section className="panel">
         <h2>Scan Locations</h2>
@@ -103,6 +138,14 @@ export function SourcesPage() {
             placeholder="C:\xampp-projects"
             required
           />
+          <button
+            type="button"
+            disabled={pickerBusy}
+            title="Choose a folder on this computer"
+            onClick={() => browseFolder(setPath)}
+          >
+            {pickerBusy ? "Browsing…" : "Browse…"}
+          </button>
           <input
             className="depth"
             type="number"
@@ -133,7 +176,7 @@ export function SourcesPage() {
                 <tr key={source.id}>
                   <td className="mono cell-path">{source.path}</td>
                   <td>{source.scanDepth}</td>
-                  <td>{formatDateTime(source.lastScannedAt)}</td>
+                  <td className="cell-last-scan">{formatDateTime(source.lastScannedAt)}</td>
                   <td>{source.repositoryCount}</td>
                   <td className="row-actions">
                     <button
@@ -188,6 +231,14 @@ export function SourcesPage() {
             placeholder="C:\path\to\git-repo"
             required
           />
+          <button
+            type="button"
+            disabled={pickerBusy}
+            title="Choose a folder on this computer (must be a Git repository)"
+            onClick={() => browseFolder(setManualPath)}
+          >
+            {pickerBusy ? "Browsing…" : "Browse…"}
+          </button>
           <button type="submit" className="primary" disabled={busy}>
             Add Individual Repository
           </button>
