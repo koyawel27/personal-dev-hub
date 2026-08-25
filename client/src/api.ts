@@ -94,6 +94,24 @@ export const client = {
     const q = search.toString();
     return api<{ activity: ActivityEventDto[] }>(`/api/activity${q ? `?${q}` : ""}`);
   },
+  activityPage: (params: {
+    projectId?: number;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    limit?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params.projectId) search.set("projectId", String(params.projectId));
+    if (params.from) search.set("from", params.from);
+    if (params.to) search.set("to", params.to);
+    if (params.cursor) search.set("cursor", params.cursor);
+    if (params.limit) search.set("limit", String(params.limit));
+    const q = search.toString();
+    return api<{ rows: ActivityEventDto[]; nextCursor: string | null }>(
+      `/api/activity/page${q ? `?${q}` : ""}`,
+    );
+  },
   githubStatus: () => api<{ status: GitHubStatusDto }>("/api/github/status"),
   settings: () =>
     api<{ settings: { defaultScanDepth: number; gitExecutable: string } }>("/api/settings"),

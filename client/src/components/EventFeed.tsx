@@ -2,6 +2,17 @@ import { Link } from "react-router-dom";
 import type { ActivityEventDto } from "@shared/api-types";
 import { eventLabel, formatDateTime } from "../format";
 
+/** Commit rows carry the LOCAL/GITHUB/LOCAL + GITHUB composition badge. */
+function isCommitEvent(eventType: string): boolean {
+  return eventType === "commit_observed" || eventType === "github_commit_observed";
+}
+
+function sourcePillClass(source: string): string {
+  if (source.includes("LOCAL + GITHUB")) return "clean";
+  if (source === "GITHUB") return "neutral";
+  return "neutral";
+}
+
 /**
  * Development-journal timeline shared by Dashboard, Activity, and Project Detail.
  * Prioritizes when / project / event / meaningful detail without card noise.
@@ -34,6 +45,11 @@ export function EventFeed({
             ) : null}
             <td>
               <span className="mono">{eventLabel(event.eventType)}</span>
+              {isCommitEvent(event.eventType) ? (
+                <span className={`pill ${sourcePillClass(event.source)}`}>
+                  {event.source}
+                </span>
+              ) : null}
             </td>
             <td>{event.summary}</td>
           </tr>

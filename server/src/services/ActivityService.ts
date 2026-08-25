@@ -300,6 +300,72 @@ export function listActivity(filters: {
 }
 
 /**
+ * Cursor-paginated variant of the logical activity feed used by the
+ * Activity page's "Load more" flow.
+ *
+ * Design: DELEGATES to listActivity() — the exact function whose commit
+ * overlap semantics the owner accepted — and slices the LOGICAL feed.
+ * This structurally guarantees the dedup invariant: merging happens over
+ * the complete filtered dataset BEFORE any page is cut, so a LOCAL +
+ * GITHUB pair can never straddle a page boundary as two rows, pages are
+ * always exactly up-to-`limit` meaningful rows, and repeated Load-more
+ * walks the feed without duplicates or disappearing logical rows.
+ *
+ * Cursor semantics (deterministic): "occurred_at|id" of the last row of
+ * the previous page; ids are strictly increasing so the pair uniquely
+ * addresses a position even under timestamp ties. Resolution finds the
+ * row's index in the freshly computed feed; if that row has since been
+ * pruned, the position falls back to counting strictly-newer rows, keeping
+ * pages stable under new inserts at the head.
+ */
+export function listActivityPaged(filters: {
+  projectId?: number;
+  repositoryId?: number;
+  from?: string;
+  to?: string;
+  limit?: number;
+  /** Opaque cursor "occurred_at|id" from the previous page. */
+  cursor?: string | null;
+}): { rows: ActivityEventDto[]; nextCursor: string | null } {
+  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+  const all = listActivity({
+    projectId: filters.projectId,
+    repositoryId: filters.repositoryId,
+    from: filters.from,
+    to: filters.to,
+  });
+
+  let startIndex = 0;
+  if (filters.cursor) {
+    const separator = filters.cursor.lastIndexOf("|");
+    const at = separator >= 0 ? filters.cursor.slice(0, separator) : "";
+    const id = separator >= 0 ? Number(filters.cursor.slice(separator + 1)) : NaN;
+    const idx = all.findIndex(
+      (row) => row.occurredAt === at && row.id === id,
+    );
+    if (idx >= 0) {
+      startIndex = idx + 1;
+    } else {
+      // Cursor row no longer present (pruned): fall back to counting
+      // strictly-newer logical rows so the position stays stable.
+      startIndex = all.filter(
+        (row) =>
+          row.occurredAt.localeCompare(at) > 0 ||
+          (row.occurredAt === at && row.id > id),
+      ).length;
+    }
+  }
+
+  const rows = all.slice(startIndex, startIndex + limit);
+  const last = rows[rows.length - 1];
+  const nextCursor =
+    last != null && startIndex + limit < all.length
+      ? `${last.occurredAt}|${last.id}`
+      : null;
+  return { rows, nextCursor };
+}
+
+/**
  * Project-owned event persistence (V1.1). Fingerprints are project-scoped:
  * "p{projectId}:{scope}:{detail}". When a local binding originated the
  * event, its id is stored on the row; project-level events pass null.

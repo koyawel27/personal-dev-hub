@@ -1,35 +1,76 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import type { ActivityEventDto, RepositoryListItem } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { EventFeed } from "../components/EventFeed";
 import { EmptyState } from "../components/EmptyState";
-import { useApi, useInvalidate } from "../useApi";
+import { useInvalidate } from "../useApi";
 
+const PAGE_SIZE = 50;
+
+/**
+ * Activity page (owner UX pass).
+ *
+ * State model:
+ * - draftProject / draftFrom / draftTo: what the controls show.
+ * - appliedProject / appliedFrom / appliedTo: what the feed queries.
+ *
+ * Project selection applies IMMEDIATELY (with the previously APPLIED date
+ * range — unsubmitted date edits stay drafts). Date changes require the
+ * explicit Filter button. Pagination is cursor-based over the LOGICAL
+ * (commit-deduplicated) feed; "Load more" appends the next batch.
+ */
 export function ActivityPage() {
   const [events, setEvents] = useState<ActivityEventDto[]>([]);
   const [repos, setRepos] = useState<RepositoryListItem[]>([]);
-  const [repositoryId, setRepositoryId] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+
+  // Draft control state.
+  const [draftProject, setDraftProject] = useState("");
+  const [draftFrom, setDraftFrom] = useState("");
+  const [draftTo, setDraftTo] = useState("");
+  // Applied query state.
+  const [appliedProject, setAppliedProject] = useState("");
+  const [appliedFrom, setAppliedFrom] = useState("");
+  const [appliedTo, setAppliedTo] = useState("");
+
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMoreFailed, setLoadingMoreFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(next?: { repositoryId?: string; from?: string; to?: string }) {
-    const repo = next?.repositoryId ?? repositoryId;
-    const fromValue = next?.from ?? from;
-    const toValue = next?.to ?? to;
-    const data = await client.activity({
-      repositoryId: repo ? Number(repo) : undefined,
-      from: fromValue ? new Date(fromValue).toISOString() : undefined,
-      to: toValue ? new Date(`${toValue}T23:59:59`).toISOString() : undefined,
+  function rangeParams(from: string, to: string): { from?: string; to?: string } {
+    return {
+      from: from ? new Date(from).toISOString() : undefined,
+      to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+    };
+  }
+
+  async function loadFirstPage(project: string, from: string, to: string) {
+    const result = await client.activityPage({
+      projectId: project ? Number(project) : undefined,
+      ...rangeParams(from, to),
+      limit: PAGE_SIZE,
     });
-    setEvents(data.activity);
+    setEvents(result.rows);
+    setCursor(result.nextCursor);
+    setHasMore(result.nextCursor != null);
+    setLoadingMoreFailed(false);
+  }
+
+  async function loadRepos() {
+    const repositories = await client.repositories();
+    setRepos(repositories.repositories);
   }
 
   useEffect(() => {
-    Promise.all([client.activity(), client.repositories()])
-      .then(([activity, repositories]) => {
-        setEvents(activity.activity);
+    Promise.all([
+      client.activityPage({ limit: PAGE_SIZE }),
+      client.repositories(),
+    ])
+      .then(([page, repositories]) => {
+        setEvents(page.rows);
+        setCursor(page.nextCursor);
+        setHasMore(page.nextCursor != null);
         setRepos(repositories.repositories);
       })
       .catch((err: unknown) => {
@@ -37,21 +78,61 @@ export function ActivityPage() {
       });
   }, []);
 
-  useInvalidate(["activity", "projects", "sources"], async () => {
+  // Project selection applies immediately: refetch page 1 with the
+  // APPLIED date range (drafts are untouched), resetting pagination.
+  function onProjectChange(value: string): void {
+    setDraftProject(value);
+    if (value === appliedProject) return;
+    setAppliedProject(value);
+    setError(null);
+    loadFirstPage(value, appliedFrom, appliedTo).catch((err: unknown) => {
+      setError(err instanceof ApiError ? err.message : "Failed to apply project filter.");
+    });
+  }
+
+  // Dates remain explicit: only Filter commits the drafts.
+  function onFilterSubmit(): void {
+    setError(null);
+    setAppliedProject(draftProject);
+    setAppliedFrom(draftFrom);
+    setAppliedTo(draftTo);
+    loadFirstPage(draftProject, draftFrom, draftTo)
+      .then(() => void loadRepos().catch(() => undefined))
+      .catch((err: unknown) => {
+        setError(err instanceof ApiError ? err.message : "Failed to apply filters.");
+      });
+  }
+
+  async function loadMore(): Promise<void> {
+    if (loadingMore || cursor == null) return;
+    setLoadingMore(true);
     try {
-      const [activity, repositories] = await Promise.all([
-        client.activity({
-          repositoryId: repositoryId ? Number(repositoryId) : undefined,
-          from: from ? new Date(from).toISOString() : undefined,
-          to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
-        }),
-        client.repositories(),
-      ]);
-      setEvents(activity.activity);
-      setRepos(repositories.repositories);
-    } catch (err: unknown) {
-      setError(err instanceof ApiError ? err.message : "Failed to refresh activity.");
+      const result = await client.activityPage({
+        projectId: appliedProject ? Number(appliedProject) : undefined,
+        ...rangeParams(appliedFrom, appliedTo),
+        cursor,
+        limit: PAGE_SIZE,
+      });
+      setEvents((previous) => {
+        const seen = new Set(previous.map((row) => `${row.occurredAt}|${row.id}`));
+        return [...previous, ...result.rows.filter((row) => !seen.has(`${row.occurredAt}|${row.id}`))];
+      });
+      setCursor(result.nextCursor);
+      setHasMore(result.nextCursor != null);
+      setLoadingMoreFailed(false);
+    } catch {
+      // Keep existing rows visible; offer retry.
+      setLoadingMoreFailed(true);
+    } finally {
+      setLoadingMore(false);
     }
+  }
+
+  useInvalidate(["activity", "projects", "sources"], () => {
+    // Reconcile from the first page of the currently APPLIED filter state.
+    setError(null);
+    loadFirstPage(appliedProject, appliedFrom, appliedTo).catch(() => undefined);
+    void loadRepos().catch(() => undefined);
   });
 
   return (
@@ -59,7 +140,7 @@ export function ActivityPage() {
       <div className="page-header">
         <div>
           <h1>Activity</h1>
-          <p className="lede">Meaningful state changes across tracked repositories.</p>
+          <p className="lede">Meaningful state changes across tracked projects.</p>
         </div>
       </div>
       {error ? <div className="error">{error}</div> : null}
@@ -67,30 +148,51 @@ export function ActivityPage() {
         className="form-row"
         onSubmit={(event) => {
           event.preventDefault();
-          load().catch((err: unknown) => {
-            setError(err instanceof ApiError ? err.message : "Failed to load activity.");
-          });
+          onFilterSubmit();
         }}
       >
-        <select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
+        <select value={draftProject} onChange={(event) => onProjectChange(event.target.value)}>
           <option value="">All projects</option>
           {repos.map((repo) => (
-            <option key={repo.id} value={repo.id}>
+            <option key={repo.id} value={String(repo.projectId ?? repo.id)}>
               {repo.name}
             </option>
           ))}
         </select>
-        <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-        <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+        <input type="date" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} />
+        <input type="date" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} />
         <button type="submit" className="primary">
           Filter
         </button>
       </form>
-      {events.length === 0 ? (
-        <EmptyState message="No activity recorded yet." hint={<span>Rescan a tracked project, or commit something in one.</span>} />
+      {events.length === 0 && !error ? (
+        <EmptyState
+          message={
+            appliedProject
+              ? "No activity matches these filters for this project yet."
+              : "No activity matches these filters."
+          }
+          hint={<span>Adjust the filters, rescan a tracked project, or commit something in one.</span>}
+        />
       ) : (
         <section className="panel">
           <EventFeed events={events} />
+          {hasMore ? (
+            <div className="load-more-row">
+              {loadingMoreFailed ? (
+                <span className="mono muted">Could not load older activity.</span>
+              ) : null}
+              <button
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          ) : events.length > 0 ? (
+            <p className="mono muted load-more-end">End of activity for these filters.</p>
+          ) : null}
         </section>
       )}
     </div>

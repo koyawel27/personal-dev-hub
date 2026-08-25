@@ -39,6 +39,7 @@ import {
   contributionYears,
   dailyDetail,
 } from "./services/ContributionService.js";
+import { listActivityPaged } from "./services/ActivityService.js";
 import { buildPicker, refreshTrackedBinding } from "./services/GitHubPickerService.js";
 import { listPortfolio } from "./services/PortfolioService.js";
 import {
@@ -309,6 +310,44 @@ export function createApp(): express.Express {
         // local binding attached).
         activity: listActivity({ projectId: effectiveProjectId, from, to }),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/activity/page", (req, res, next) => {
+    try {
+      const repositoryIdRaw = req.query.repositoryId;
+      const projectIdRaw = req.query.projectId;
+      const repositoryId =
+        typeof repositoryIdRaw === "string" && repositoryIdRaw
+          ? requireId(repositoryIdRaw, "repository")
+          : undefined;
+      const projectId =
+        typeof projectIdRaw === "string" && projectIdRaw
+          ? requireId(projectIdRaw, "repository")
+          : undefined;
+      let effectiveProjectId = projectId;
+      if (effectiveProjectId == null && repositoryId != null) {
+        const row = getDb()
+          .prepare("SELECT project_id FROM local_repositories WHERE id = ?")
+          .get(repositoryId) as { project_id: number | null } | undefined;
+        effectiveProjectId = row?.project_id ?? undefined;
+      }
+      const from = typeof req.query.from === "string" ? req.query.from : undefined;
+      const to = typeof req.query.to === "string" ? req.query.to : undefined;
+      const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null;
+      const limitRaw = Number(req.query.limit);
+      const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+      res.json(
+        listActivityPaged({
+          projectId: effectiveProjectId,
+          from,
+          to,
+          cursor,
+          limit,
+        }),
+      );
     } catch (err) {
       next(err);
     }

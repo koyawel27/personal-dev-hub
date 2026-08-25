@@ -31,7 +31,16 @@ export function eventLabel(eventType: string): string {
     case "repository_discovered":
       return "Discovered";
     case "commit_observed":
+    case "github_commit_observed":
+      // Merged LOCAL + GITHUB rows keep the same readable label; the
+      // composition is shown by a source badge, not the event name.
       return "Commit";
+    case "github_repo_tracked":
+      return "GitHub connected";
+    case "github_repo_untracked":
+      return "GitHub disconnected";
+    case "github_binding_updated":
+      return "GitHub updated";
     case "project_status_changed":
       return "Status";
     case "project_note_updated":
@@ -47,6 +56,9 @@ export function eventLabel(eventType: string): string {
     case "behind_changed":
       return "Behind";
     default:
-      return eventType;
+      // Safe fallback for future event types: never show raw snake_case.
+      return eventType
+        .replace(/[_-]+/g, " ")
+        .replace(/^\w/, (c) => c.toUpperCase());
   }
 }
