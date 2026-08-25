@@ -159,12 +159,24 @@ export function persistActivityEvents(
  * (repo tracked/untracked, discoveries, metadata changes, tree/branch
  * transitions) are distinct history and always pass through untouched.
  */
-export function listActivity(filters: {
+export type ActivityFeedFilters = {
   projectId?: number;
   repositoryId?: number;
   from?: string;
   to?: string;
-}): ActivityEventDto[] {
+};
+
+/**
+ * Shared logical-feed builder: full Project/date filtering, read-time
+ * commit dedup by PROJECT + lower(SHA), LOCAL/GITHUB/LOCAL + GITHUB source
+ * semantics, deterministic ordering (occurred_at DESC, id DESC).
+ * UNBOUNDED by design — consumers decide their own ceiling:
+ * - listActivity() slices to 200 for the legacy endpoint and Dashboard;
+ * - listActivityPaged() walks the complete filtered feed for Load-more.
+ */
+function buildLogicalActivityFeed(
+  filters: ActivityFeedFilters,
+): ActivityEventDto[] {
   const clauses: string[] = [];
   const params: Array<string | number> = [];
   if (filters.projectId != null) {
@@ -200,8 +212,7 @@ export function listActivity(filters: {
        LEFT JOIN local_repositories lr ON lr.id = e.local_repository_id
        LEFT JOIN projects p ON p.id = COALESCE(e.project_id, lr.project_id)
        ${where}
-       ORDER BY e.occurred_at DESC, e.id DESC
-       LIMIT 400`,
+       ORDER BY e.occurred_at DESC, e.id DESC`,
     )
     .all(...params) as Array<{
     id: number;
@@ -295,21 +306,31 @@ export function listActivity(filters: {
     })
     .sort((a, b) =>
       b.occurredAt.localeCompare(a.occurredAt) || b.id - a.id,
-    )
-    .slice(0, 200);
+    );
+}
+
+/**
+ * Legacy bounded view: newest 200 logical rows. Used by GET /api/activity
+ * and the Dashboard (recent activity + weekly rollup). The cap is a
+ * deliberate safety bound for these consumers — pagination consumers use
+ * listActivityPaged(), which walks the complete feed.
+ */
+export function listActivity(filters: ActivityFeedFilters): ActivityEventDto[] {
+  return buildLogicalActivityFeed(filters).slice(0, 200);
 }
 
 /**
  * Cursor-paginated variant of the logical activity feed used by the
  * Activity page's "Load more" flow.
  *
- * Design: DELEGATES to listActivity() — the exact function whose commit
- * overlap semantics the owner accepted — and slices the LOGICAL feed.
- * This structurally guarantees the dedup invariant: merging happens over
- * the complete filtered dataset BEFORE any page is cut, so a LOCAL +
- * GITHUB pair can never straddle a page boundary as two rows, pages are
- * always exactly up-to-`limit` meaningful rows, and repeated Load-more
- * walks the feed without duplicates or disappearing logical rows.
+ * Design: delegates to buildLogicalActivityFeed() — the shared pipeline
+ * whose commit overlap semantics the owner accepted — with NO row cap, so
+ * traversal can reach every logical row in the filtered history (the 200
+ * ceiling lives only in listActivity(), the legacy/Dashboard consumer).
+ * Merging happens over the complete dataset BEFORE any page is cut, so a
+ * LOCAL + GITHUB pair can never straddle a page boundary as two rows;
+ * pages are always exactly up-to-`limit` meaningful rows, and repeated
+ * Load-more walks the feed without duplicates or disappearing rows.
  *
  * Cursor semantics (deterministic): "occurred_at|id" of the last row of
  * the previous page; ids are strictly increasing so the pair uniquely
@@ -328,7 +349,7 @@ export function listActivityPaged(filters: {
   cursor?: string | null;
 }): { rows: ActivityEventDto[]; nextCursor: string | null } {
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
-  const all = listActivity({
+  const all = buildLogicalActivityFeed({
     projectId: filters.projectId,
     repositoryId: filters.repositoryId,
     from: filters.from,

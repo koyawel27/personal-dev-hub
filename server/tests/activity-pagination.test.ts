@@ -264,4 +264,104 @@ describe("activity pagination over the logical feed", () => {
     const dashboard = await request(app).get("/api/dashboard");
     expect(dashboard.status).toBe(200);
   });
+
+  it("traverses COMPLETE history beyond the legacy 200-row ceiling (>200 logical rows)", async () => {
+    // Regression for the confirmed blocker: listActivityPaged() previously
+    // delegated to the 200-capped listActivity(), so Load more died at
+    // logical row 200 and falsely reported end-of-feed.
+    const dir = path.dirname(useTempDb()) + "/activity-huge";
+    fs.mkdirSync(dir, { recursive: true });
+    const { gitExec } = await import("./helpers.js");
+    await gitExec(dir, ["init", "-b", "main"]);
+    await gitExec(dir, ["config", "user.email", "dev@example.com"]);
+    await gitExec(dir, ["config", "user.name", "Dev"]);
+    fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");
+    await gitExec(dir, ["add", "seed.txt"]);
+    await gitExec(dir, ["commit", "-m", "repo seed"]);
+    const created = await request(app).post("/api/repositories/manual").send({ path: dir });
+    expect(created.status).toBe(201);
+    const projectId = created.body.repository.projectId as number;
+    const bindingId = Number(created.body.repository.id);
+
+    // 254 singleton local commits + one Local/GitHub overlap pair (2 raw
+    // rows merging into ONE logical row) => 255 logical rows total.
+    const insert = getDb().prepare(
+      `INSERT INTO activity_events
+        (project_id, local_repository_id, event_type, summary, occurred_at, source, fingerprint, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (let i = 0; i < 254; i += 1) {
+      const month = String(Math.floor(i / 28) + 1).padStart(2, "0");
+      const day = String((i % 28) + 1).padStart(2, "0");
+      const at = `2025-${month}-${day}T08:00:00Z`;
+      const sha = `${String(i).padStart(4, "0")}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`;
+      insert.run(
+        projectId,
+        bindingId,
+        "commit_observed",
+        `deep history ${String(i).padStart(3, "0")}`,
+        at,
+        "scan",
+        `p${projectId}:${bindingId}:deep:${sha}`,
+        JSON.stringify({ sha }),
+      );
+    }
+    const overlapSha = "ffffffffffffffffffffffffffffffffffffffff";
+    insert.run(
+      projectId,
+      bindingId,
+      "commit_observed",
+      "deep overlap commit",
+      "2024-01-01T00:00:00Z",
+      "scan",
+      `p${projectId}:${bindingId}:deepov:${overlapSha}`,
+      JSON.stringify({ sha: overlapSha }),
+    );
+    insert.run(
+      projectId,
+      null,
+      "github_commit_observed",
+      "deep overlap commit",
+      "2024-01-01T12:00:00Z",
+      "user",
+      `p${projectId}:gh:deepov:${overlapSha}`,
+      JSON.stringify({ sha: overlapSha }),
+    );
+
+    // Walk EVERY page through the real API.
+    const all: Page["rows"] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page = await fetchPage({
+        projectId,
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      });
+      all.push(...page.rows);
+      cursor = page.nextCursor;
+      pages += 1;
+      expect(pages).toBeLessThan(20); // runaway guard
+    } while (cursor != null);
+
+    // 50+50+50+50+50+7: 254 seeded singles + 1 merged pair + the seed
+    // commit + repository_discovered = 257 logical rows.
+    expect(all.length).toBe(257);
+    expect(new Set(all.map((row) => row.id)).size).toBe(257); // no duplicates
+    // The overlap pair is ONE logical row with composed source.
+    const overlapRows = all.filter((row) => row.source === "LOCAL + GITHUB");
+    expect(overlapRows).toHaveLength(1);
+    expect(overlapRows[0].occurredAt).toBe("2024-01-01T00:00:00Z"); // local ts wins
+    // Final page correctly reports exhaustion (no false end at row 200).
+    expect(cursor).toBeNull();
+
+    // Legacy bounded consumer unchanged: capped at 200 newest logical rows.
+    const legacy = await request(app).get(`/api/activity?projectId=${projectId}`);
+    expect((legacy.body.activity as unknown[]).length).toBe(200);
+    const dashboard = await request(app).get("/api/dashboard");
+    expect(dashboard.status).toBe(200);
+    expect(
+      (dashboard.body.recentActivity as unknown[]).length,
+    ).toBeLessThanOrEqual(10);
+  });
 });
