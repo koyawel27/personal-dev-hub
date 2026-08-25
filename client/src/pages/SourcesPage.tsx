@@ -117,7 +117,7 @@ export function SourcesPage() {
         {sources.length === 0 ? (
           <p className="empty">No scan locations configured yet.</p>
         ) : (
-          <table className="table">
+          <table className="table sources-table">
             <thead>
               <tr>
                 <th>Path</th>
@@ -130,7 +130,7 @@ export function SourcesPage() {
             <tbody>
               {sources.map((source) => (
                 <tr key={source.id}>
-                  <td className="mono">{source.path}</td>
+                  <td className="mono cell-path">{source.path}</td>
                   <td>{source.scanDepth}</td>
                   <td>{formatDateTime(source.lastScannedAt)}</td>
                   <td>{source.repositoryCount}</td>
@@ -194,7 +194,7 @@ export function SourcesPage() {
         {manualRepos.length === 0 && repos.length === 0 ? (
           <p className="empty">{EMPTY_STATES.noProjects}</p>
         ) : (
-          <table className="table">
+          <table className="table sources-table">
             <thead>
               <tr>
                 <th>Project</th>
@@ -206,13 +206,13 @@ export function SourcesPage() {
             <tbody>
               {repos.map((repo) => (
                 <tr key={repo.id}>
-                  <td>
+                  <td className="cell-name">
                     <Link className="list-link" to={`/projects/${repo.id}`}>
                       {repo.name}
                     </Link>
                   </td>
-                  <td className="mono">{repo.localPath}</td>
-                  <td>{repo.discoveryType}</td>
+                  <td className="mono cell-path" title={repo.localPath}>{repo.localPath}</td>
+                  <td className="cell-added">{repo.discoveryType}</td>
                   <td className="row-actions">
                     <button
                       type="button"

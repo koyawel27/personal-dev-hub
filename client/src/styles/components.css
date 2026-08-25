@@ -374,6 +374,50 @@ button:disabled {
   font-size: 12px;
 }
 
+/* ---------- Sources tables (scan locations + individual repositories) ----------
+   Compact single-row layout on desktop. Column priority when space tightens:
+   Path shrinks first (ellipsis), then Project; Added-as and Actions stay
+   non-wrapping so buttons never stack while desktop width remains. */
+
+.sources-table .cell-path {
+  /* Auto-table truncation trick: max-width 0 tells the column algorithm the
+     path claims no width, so name/added/actions get theirs FIRST and the
+     path column receives whatever remains — ellipsing instead of wrapping. */
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sources-table .cell-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sources-table .cell-added {
+  white-space: nowrap;
+}
+
+.sources-table td.row-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  /* Genuinely narrow viewports: allow stacking again, keep rows readable. */
+  .sources-table td.row-actions,
+  .sources-table .row-actions {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .sources-table .cell-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* ---------- GitHub repository picker (V1.1) ---------- */
 
 .picker-head {
