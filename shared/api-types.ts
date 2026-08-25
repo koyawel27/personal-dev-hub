@@ -281,7 +281,14 @@ export type ActivityEventDto = {
   eventType: EventType;
   summary: string;
   occurredAt: string;
+  /**
+   * Observation composition for commit rows: LOCAL, GITHUB, or
+   * LOCAL + GITHUB (same Project + SHA observed by both). Non-commit rows
+   * keep their raw storage origin ("scan" | "user").
+   */
   source: string;
+  /** Commit identity when this row is (or merges) a commit observation. */
+  sha?: string;
 };
 
 /** Picker row served by GET /api/github/repositories. */

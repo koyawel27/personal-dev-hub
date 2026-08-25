@@ -149,6 +149,15 @@ export function persistActivityEvents(
  * project name resolves through the owning project (falling back to the
  * binding name for pre-004 rows), and GitHub-origin events appear alongside
  * local ones. Optional filters: projectId, repositoryId, date range.
+ *
+ * Commit dedup (owner decision): one logical commit observed by BOTH the
+ * local scan and a tracked GitHub refresh is ONE meaningful activity row,
+ * not two. Raw observations are preserved on disk; collapse happens here at
+ * read time using the canonical key PROJECT + commit SHA (metadata_json.sha)
+ * — the same identity rule Combined Contributions already applies. Subjects,
+ * authors, and timestamps are never used as identity. Non-commit events
+ * (repo tracked/untracked, discoveries, metadata changes, tree/branch
+ * transitions) are distinct history and always pass through untouched.
  */
 export function listActivity(filters: {
   projectId?: number;
@@ -185,13 +194,14 @@ export function listActivity(filters: {
          e.event_type,
          e.summary,
          e.occurred_at,
-         e.source
+         e.source,
+         lower(json_extract(e.metadata_json, '$.sha')) AS sha
        FROM activity_events e
        LEFT JOIN local_repositories lr ON lr.id = e.local_repository_id
        LEFT JOIN projects p ON p.id = COALESCE(e.project_id, lr.project_id)
        ${where}
        ORDER BY e.occurred_at DESC, e.id DESC
-       LIMIT 200`,
+       LIMIT 400`,
     )
     .all(...params) as Array<{
     id: number;
@@ -202,17 +212,91 @@ export function listActivity(filters: {
     summary: string;
     occurred_at: string;
     source: string;
+    sha: string | null;
   }>;
-  return rows.map((row) => ({
-    id: row.id,
-    projectId: row.project_id ?? 0,
-    localRepositoryId: row.local_repository_id ?? 0,
-    projectName: row.project_name ?? "(unknown)",
-    eventType: row.event_type,
-    summary: row.summary,
-    occurredAt: row.occurred_at,
-    source: row.source,
-  }));
+
+  type Row = (typeof rows)[number];
+  interface MergedRow extends Row {
+    sources: Set<"local" | "github">;
+    /** Local observation wins: it carries the true Git author date. */
+    displayAt: string;
+    primaryId: number;
+  }
+
+  // Pass 1: group commit observations by Project + SHA; keep every other
+  // event as its own entry untouched.
+  type Entry = { kind: "commit"; merged: MergedRow } | { kind: "plain"; row: Row };
+  const entries: Entry[] = [];
+  const commitIndex = new Map<string, MergedRow>();
+  for (const row of rows) {
+    const isLocalCommit = row.event_type === "commit_observed";
+    const isGithubCommit = row.event_type === "github_commit_observed";
+    if ((!isLocalCommit && !isGithubCommit) || row.project_id == null || row.sha == null) {
+      entries.push({ kind: "plain", row });
+      continue;
+    }
+    const key = `${row.project_id}:${row.sha}`;
+    let merged = commitIndex.get(key);
+    if (!merged) {
+      merged = {
+        ...row,
+        sources: new Set([isGithubCommit ? "github" : "local"]),
+        displayAt: row.occurred_at,
+        primaryId: row.id,
+      };
+      commitIndex.set(key, merged);
+      entries.push({ kind: "commit", merged });
+      continue;
+    }
+    // Second observation of the same logical commit: merge, do not emit.
+    merged.sources.add(isGithubCommit ? "github" : "local");
+    // Timestamp precedence: the LOCAL observation carries the true Git
+    // author date captured at scan time in the machine's original zone;
+    // prefer it so a later GitHub refresh cannot make an old commit look
+    // newly active.
+    if (isLocalCommit && !merged.sources.has("local")) {
+      merged.displayAt = row.occurred_at;
+      merged.primaryId = row.id;
+    } else if (isLocalCommit) {
+      merged.displayAt = row.occurred_at;
+    }
+  }
+
+  // Pass 2: emit in the SQL order (stable), re-inserting merged rows at
+  // their chosen display timestamp position.
+  return entries
+    .map((entry) => {
+      if (entry.kind === "plain") {
+        const row = entry.row;
+        return {
+          id: row.id,
+          projectId: row.project_id ?? 0,
+          localRepositoryId: row.local_repository_id ?? 0,
+          projectName: row.project_name ?? "(unknown)",
+          eventType: row.event_type,
+          summary: row.summary,
+          occurredAt: row.occurred_at,
+          source: row.source,
+        } satisfies ActivityEventDto;
+      }
+      const m = entry.merged;
+      const dual = m.sources.has("local") && m.sources.has("github");
+      return {
+        id: m.primaryId,
+        projectId: m.project_id ?? 0,
+        localRepositoryId: m.local_repository_id ?? 0,
+        projectName: m.project_name ?? "(unknown)",
+        eventType: m.event_type,
+        summary: m.summary,
+        occurredAt: m.displayAt,
+        source: dual ? "LOCAL + GITHUB" : [...m.sources][0] === "github" ? "GITHUB" : "LOCAL",
+        sha: m.sha ?? undefined,
+      } satisfies ActivityEventDto;
+    })
+    .sort((a, b) =>
+      b.occurredAt.localeCompare(a.occurredAt) || b.id - a.id,
+    )
+    .slice(0, 200);
 }
 
 /**
