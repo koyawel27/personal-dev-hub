@@ -182,4 +182,22 @@ describe("Sources Browse… click path", () => {
     await waitFor(() => expect(browse.disabled).toBe(false));
     expect(selectFolder).toHaveBeenCalledTimes(1);
   });
+
+  it("retry after backend failure works WITHOUT a page refresh", async () => {
+    // First attempt: backend reports the picker cannot start.
+    selectFolder.mockRejectedValueOnce(
+      new Error("FOLDER_PICKER_FAILED: The folder picker could not be opened."),
+    );
+    await renderSources();
+
+    fireEvent.click(scanBrowseButton());
+    const hint = await screen.findByRole("status");
+    expect(hint.textContent).toContain("Folder browser unavailable");
+
+    // Second click — same mounted page, no F5 — now succeeds end to end.
+    selectFolder.mockResolvedValue({ selected: true, path: "C:\\recovered" });
+    fireEvent.click(scanBrowseButton());
+    await waitFor(() => expect(scanLocationInput().value).toBe("C:\\recovered"));
+    expect(selectFolder).toHaveBeenCalledTimes(2);
+  });
 });

@@ -291,10 +291,27 @@ export function createApp(): express.Express {
   // the dialog is pure UI — no source configuration is touched. The server
   // binds to 127.0.0.1 (local-first app), so this surface is only reachable
   // from the owner's machine; it never deletes/moves/creates anything.
-  app.post("/api/system/select-folder", (_req, res, next) => {
-    selectFolder()
-      .then((outcome) => res.json(outcome))
-      .catch(next);
+  //
+  // Client disconnect (browser refresh/close) aborts the picker: the dialog
+  // child is terminated and the single-flight guard clears, so a refresh
+  // can never leave a permanent BUSY state or a zombie dialog behind.
+  // Expressed over the raw response 'close' event so it does not depend on
+  // Express-version-specific request abortSignal typings.
+  app.post("/api/system/select-folder", (req, res, next) => {
+    const disconnect = new AbortController();
+    const onClose = (): void => disconnect.abort();
+    res.on("close", onClose);
+    selectFolder(disconnect.signal)
+      .then((outcome) => {
+        res.off("close", onClose);
+        res.json(outcome);
+      })
+      .catch((err: unknown) => {
+        res.off("close", onClose);
+        if (!res.headersSent) {
+          next(err);
+        }
+      });
   });
 
   app.get("/api/activity", (req, res, next) => {
