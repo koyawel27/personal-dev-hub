@@ -13,12 +13,28 @@
   --border: #ddd5c4;
   --border-strong: #c9bfa9;
   --text: #2b2620;
-  --text-muted: #7a7263;
-  --text-faint: #948b7a;
+  /*
+   * Secondary-text contrast (baseline repair): small text using these
+   * tokens must reach >= 4.5:1 on the page (#ece7da) and panel (#faf7f0)
+   * surfaces. Previous values (#7a7263 / #948b7a) measured ~3.85:1 and
+   * ~2.73:1 on the page; these deepen the same warm hue family without
+   * darkening the overall UI.
+   */
+  --text-muted: #6b6355;
+  /*
+   * --text-faint is the quietest tier and is reserved for decorative /
+   * brand micro-labels. Real informational text at small sizes uses
+   * --text-muted instead (see .table th / .hint-text overrides below):
+   * no tone in this warm family reaches 4.5:1 on the page background
+   * while staying visually "faint", so usage is restricted rather than
+   * the token darkened into a second copy of --text-muted.
+   */
+  --text-faint: #776e5c;
 
   /* semantic accents — restrained */
   --accent: #a8623a;
-  --accent-strong: #8f512e;
+  /* Deepened for link text at small sizes (>= 4.5:1 on both surfaces). */
+  --accent-strong: #7d4526;
   --accent-soft: #f3e4d3;
 
   /* contribution year-grid geometry */

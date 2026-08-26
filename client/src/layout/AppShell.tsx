@@ -31,6 +31,9 @@ const utility = [
 export function AppShell() {
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <aside className="sidebar">
         <div className="brand">
           <BrandMark />
@@ -75,7 +78,9 @@ export function AppShell() {
 
         <div className="sidebar-foot mono">read-only git · v1</div>
       </aside>
-      <main className="main">
+      {/* tabindex="-1": lets fragment navigation move real focus here so
+          the next Tab press starts from the page content. */}
+      <main className="main" id="main-content" tabIndex={-1}>
         <Outlet />
       </main>
     </div>
