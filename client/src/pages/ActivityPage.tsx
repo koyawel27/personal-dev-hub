@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ActivityEventDto, RepositoryListItem } from "@shared/api-types";
+import type { ActivityEventDto, ProjectListItemDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { EventFeed } from "../components/EventFeed";
 import { EmptyState } from "../components/EmptyState";
@@ -21,7 +21,9 @@ const PAGE_SIZE = 50;
  */
 export function ActivityPage() {
   const [events, setEvents] = useState<ActivityEventDto[]>([]);
-  const [repos, setRepos] = useState<RepositoryListItem[]>([]);
+  // Activity is PROJECT-centric: the selector lists every Project
+  // (LOCAL ONLY, LOCAL + GITHUB, GITHUB ONLY) with Project ids as values.
+  const [projects, setProjects] = useState<ProjectListItemDto[]>([]);
 
   // Draft control state.
   const [draftProject, setDraftProject] = useState("");
@@ -57,21 +59,21 @@ export function ActivityPage() {
     setLoadingMoreFailed(false);
   }
 
-  async function loadRepos() {
-    const repositories = await client.repositories();
-    setRepos(repositories.repositories);
+  async function loadProjects() {
+    const data = await client.projects();
+    setProjects(data.projects);
   }
 
   useEffect(() => {
     Promise.all([
       client.activityPage({ limit: PAGE_SIZE }),
-      client.repositories(),
+      client.projects(),
     ])
-      .then(([page, repositories]) => {
+      .then(([page, projectData]) => {
         setEvents(page.rows);
         setCursor(page.nextCursor);
         setHasMore(page.nextCursor != null);
-        setRepos(repositories.repositories);
+        setProjects(projectData.projects);
       })
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : "Failed to load activity.");
@@ -97,7 +99,7 @@ export function ActivityPage() {
     setAppliedFrom(draftFrom);
     setAppliedTo(draftTo);
     loadFirstPage(draftProject, draftFrom, draftTo)
-      .then(() => void loadRepos().catch(() => undefined))
+      .then(() => void loadProjects().catch(() => undefined))
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : "Failed to apply filters.");
       });
@@ -132,7 +134,7 @@ export function ActivityPage() {
     // Reconcile from the first page of the currently APPLIED filter state.
     setError(null);
     loadFirstPage(appliedProject, appliedFrom, appliedTo).catch(() => undefined);
-    void loadRepos().catch(() => undefined);
+    void loadProjects().catch(() => undefined);
   });
 
   return (
@@ -143,7 +145,11 @@ export function ActivityPage() {
           <p className="lede">Meaningful state changes across tracked projects.</p>
         </div>
       </div>
-      {error ? <div className="error">{error}</div> : null}
+      {error ? (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      ) : null}
       <form
         className="form-row"
         onSubmit={(event) => {
@@ -151,16 +157,25 @@ export function ActivityPage() {
           onFilterSubmit();
         }}
       >
-        <select value={draftProject} onChange={(event) => onProjectChange(event.target.value)}>
-          <option value="">All projects</option>
-          {repos.map((repo) => (
-            <option key={repo.id} value={String(repo.projectId ?? repo.id)}>
-              {repo.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} />
-        <input type="date" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} />
+        <label className="form-field">
+          <span>Project</span>
+          <select value={draftProject} onChange={(event) => onProjectChange(event.target.value)}>
+            <option value="">All projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={String(project.id)}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="form-field">
+          <span>From</span>
+          <input type="date" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} />
+        </label>
+        <label className="form-field">
+          <span>To</span>
+          <input type="date" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} />
+        </label>
         <button type="submit" className="primary">
           Filter
         </button>
