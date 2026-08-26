@@ -118,7 +118,11 @@ export function MetadataEditor({
         <button type="submit" className="primary" disabled={saving}>
           {saving ? "Saving…" : "Save Metadata"}
         </button>
-        {savedFlash ? <span className="notice-inline">Saved.</span> : null}
+        {savedFlash ? (
+          <span className="notice-inline" role="status">
+            Saved.
+          </span>
+        ) : null}
       </div>
     </form>
   );

@@ -105,7 +105,11 @@ export function ProjectsPage() {
           </p>
         </div>
       </div>
-      {error ? <div className="error">{error}</div> : null}
+      {error ? (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      ) : null}
       <div className="filters">
         {CHIPS.map((chip) => (
           <button
@@ -117,11 +121,14 @@ export function ProjectsPage() {
             {chip.label}
           </button>
         ))}
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search name, status, path, or GitHub identity"
-        />
+        <label className="form-field">
+          <span>Search</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search name, status, path, or GitHub identity"
+          />
+        </label>
       </div>
 
       {!loaded ? (

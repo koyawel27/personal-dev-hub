@@ -66,8 +66,16 @@ export function SettingsPage() {
           Refresh Status
         </button>
       </div>
-      {error ? <div className="error">{error}</div> : null}
-      {notice ? <div className="notice">{notice}</div> : null}
+      {error ? (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="notice" role="status">
+          {notice}
+        </div>
+      ) : null}
 
       <section className="panel">
         <h2>

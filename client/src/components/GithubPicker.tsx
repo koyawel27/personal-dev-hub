@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PickerEntryDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { notifyMutations } from "../lib/mutations";
@@ -74,6 +74,45 @@ export function GithubPickerSection() {
     entry: PickerEntryDto;
   } | null>(null);
 
+  // Modal focus management: initial focus lands on the safe action
+  // (cancel), Tab/Shift+Tab cycle inside the dialog, Escape closes it,
+  // and focus returns to the trigger on close.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!pendingDelete) return;
+    cancelButtonRef.current?.focus();
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setPendingDelete(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [pendingDelete]);
+
   const entries = data?.entries ?? [];
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -134,6 +173,8 @@ export function GithubPickerSection() {
    * For a GITHUB ONLY row whose project holds meaningful state, the backend
    * refuses with PROJECT_HAS_NO_SOURCES; we then surface an explicit
    * keep-or-delete confirmation instead of retrying destructively.
+   * Returns focus to the row's trigger button after the dialog closes so
+   * keyboard users are not dropped back at the document start.
    */
   async function untrackRow(entry: PickerEntryDto, confirmDeleteProject = false): Promise<void> {
     if (!entry.tracked || entry.trackedBindingId == null) return;
@@ -167,8 +208,16 @@ export function GithubPickerSection() {
       );
     } finally {
       setRowUntrack((previous) => ({ ...previous, [entry.fullName]: false }));
+      // Focus return: the row trigger re-renders after busy-state clears;
+      // wait one frame so the ref points at the live element again.
+      requestAnimationFrame(() => {
+        rowActionRefs.current[entry.fullName]?.focus();
+      });
     }
   }
+
+  /** Live refs to each tracked row's primary action for focus return. */
+  const rowActionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   /** Explicit owner-confirmed deletion of the remaining project record. */
   async function confirmPendingDelete(): Promise<void> {
@@ -249,16 +298,21 @@ export function GithubPickerSection() {
       ) : (
         <>
           <div className="picker-controls">
-            <input
-              className="input picker-search"
-              placeholder="Search name or language…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
+            <label className="form-field">
+              <span>Search repositories</span>
+              <input
+                className="input picker-search"
+                placeholder="Search name or language…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
             <div className="chip-row">
               {FILTERS.map((option) => (
                 <button
                   key={option.key}
+                  type="button"
+                  aria-pressed={filter === option.key}
                   className={`chip ${filter === option.key ? "active" : ""}`}
                   onClick={() => setFilter(option.key)}
                 >
@@ -309,6 +363,9 @@ export function GithubPickerSection() {
                       <span className="picker-actions">
                         <button
                           type="button"
+                          ref={(element) => {
+                            rowActionRefs.current[entry.fullName] = element;
+                          }}
                           className="btn subtle"
                           disabled={rowRefresh[entry.fullName] === "busy" || rowUntrack[entry.fullName]}
                           title="Refresh this tracked repository's metadata and recent commits"
@@ -363,13 +420,18 @@ export function GithubPickerSection() {
                 : `Track selected${selected.size > 0 ? ` (${selected.size})` : ""}`}
             </button>
           </div>
-          {notice != null ? <p className="empty-line">{notice}</p> : null}
+          {notice != null ? (
+            <p className="empty-line" role="status">
+              {notice}
+            </p>
+          ) : null}
         </>
       )}
       {pendingDelete != null ? (
         <div className="modal-backdrop" role="presentation">
           <div
             className="modal"
+            ref={dialogRef}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="untrack-confirm-title"
@@ -385,7 +447,12 @@ export function GithubPickerSection() {
               The real GitHub repository is never modified by this action.
             </p>
             <div className="modal-actions">
-              <button type="button" className="btn subtle" onClick={() => setPendingDelete(null)}>
+              <button
+                type="button"
+                ref={cancelButtonRef}
+                className="btn subtle"
+                onClick={() => setPendingDelete(null)}
+              >
                 Keep project (cancel)
               </button>
               <button
