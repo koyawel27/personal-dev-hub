@@ -54,6 +54,15 @@
   --shadow-offset: 2px 2px 0 rgba(43, 38, 32, 0.12);
   --shadow-offset-press: 1px 1px 0 rgba(43, 38, 32, 0.1);
 
+  /*
+   * Vertical rhythm between page sections (Dashboard pass). Applied at
+   * the layout level (.panel + .panel, .panel + .dash-columns) so every
+   * panel transition shares one gap — including transitions into wrapped
+   * panel GROUPS like the Dashboard's Recent Activity / Needs Attention
+   * columns, which previously sat flush against the panel above them.
+   */
+  --section-gap: 16px;
+
   /* atmospheric texture (kept faint; see texture.css) */
   --grid-line: rgba(43, 38, 32, 0.022);
   --grid-size: 20px;

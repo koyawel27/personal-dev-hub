@@ -152,7 +152,8 @@
   justify-content: space-between;
   align-items: flex-end;
   gap: 16px;
-  margin-bottom: 18px;
+  /* Same shared rhythm token as panel transitions. */
+  margin-bottom: var(--section-gap);
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border-strong);
 }
@@ -407,10 +408,12 @@ a.btn.subtle:hover {
 
 .stat-label {
   display: block;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  /* Slightly relaxed tracking so the small uppercase labels stay legible
+     without gaining weight (Dashboard scanability pass). */
+  letter-spacing: 0.045em;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -433,8 +436,12 @@ a.btn.subtle:hover {
 }
 
 .panel + .panel,
+.panel + .dash-columns,
 .stack > * + * {
-  margin-top: 16px;
+  /* One shared section gap — including transitions into the Dashboard's
+     wrapped panel group (div.dash-columns), which is not itself a panel
+     and therefore never matched the old panel-adjacency rule. */
+  margin-top: var(--section-gap);
 }
 
 /* ---------- tables ---------- */
@@ -838,11 +845,26 @@ a.btn.subtle:hover {
 
 .project-row-main {
   min-width: 0;
+  flex: 1;
+}
+
+.project-row-main .list-link {
+  /* Primary working area: the project name is the row's headline. */
+  font-size: 13.5px;
 }
 
 .project-row-main .row-meta {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.project-row-main .mono.muted {
+  /* Technical line (branch · commit subject): one ellipsized line so
+     every row keeps the same height and the right-hand timeline stays
+     horizontally aligned while scanning. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .project-row-side {
@@ -862,7 +884,7 @@ a.btn.subtle:hover {
 .calendar-preview {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .preview-strip {
@@ -1350,8 +1372,19 @@ button.cell:hover:not(:disabled) {
 .dash-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
-  gap: 16px;
+  /* Horizontal column gap owned by the parent (same rhythm token as the
+     section transitions above this group). */
+  gap: var(--section-gap);
   align-items: start;
+}
+
+.dash-columns > .panel + .panel {
+  /* Parent-owned layout: these panels are COLUMNS, not stacked sections.
+     The generic page-level .panel + .panel margin must not vertically
+     offset the second column — column tops must align exactly, and the
+     horizontal gap comes from the grid gap above. When the group stacks
+     at narrow widths, the grid's row-gap provides the section rhythm. */
+  margin-top: 0;
 }
 
 .attention-item {
@@ -1413,6 +1446,30 @@ button.cell:hover:not(:disabled) {
        intrinsic width expand the column (and the document) instead of
        letting the table scroll locally. */
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1180px) {
+  /* Summary strip leaves the fixed five-across row before its nowrap
+     labels start clipping inside the strip's overflow:hidden. Same
+     auto-fit wrap the strip already uses at narrow widths, engaged
+     earlier so desktop keeps a single row as long as it truly fits. */
+  .stat-strip {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+
+  .stat-unit {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stat-unit:nth-last-child(1) {
+    border-bottom: none;
+  }
+
+  /* When the strip wraps into two rows, drop the divider on row ends too. */
+  .stat-unit:nth-child(2n) {
+    border-right: none;
   }
 }
 
