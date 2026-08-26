@@ -111,8 +111,16 @@ export function SourcesPage() {
           Rescan All
         </button>
       </div>
-      {error ? <div className="error">{error}</div> : null}
-      {notice ? <div className="notice">{notice}</div> : null}
+      {error ? (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="notice" role="status">
+          {notice}
+        </div>
+      ) : null}
       {pickerError ? (
         <p className="hint-text danger" role="status">
           {pickerError} You can still type or paste a path manually.
@@ -132,12 +140,15 @@ export function SourcesPage() {
             });
           }}
         >
-          <input
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder="C:\xampp-projects"
-            required
-          />
+          <label className="form-field">
+            <span>Scan path</span>
+            <input
+              value={path}
+              onChange={(event) => setPath(event.target.value)}
+              placeholder="C:\xampp-projects"
+              required
+            />
+          </label>
           <button
             type="button"
             disabled={pickerBusy}
@@ -146,14 +157,17 @@ export function SourcesPage() {
           >
             {pickerBusy ? "Browsing…" : "Browse…"}
           </button>
-          <input
-            className="depth"
-            type="number"
-            min={0}
-            max={8}
-            value={depth}
-            onChange={(event) => setDepth(event.target.value)}
-          />
+          <label className="form-field">
+            <span>Scan depth</span>
+            <input
+              className="depth"
+              type="number"
+              min={0}
+              max={8}
+              value={depth}
+              onChange={(event) => setDepth(event.target.value)}
+            />
+          </label>
           <button type="submit" className="primary" disabled={busy}>
             Add Scan Location
           </button>
@@ -225,12 +239,15 @@ export function SourcesPage() {
             });
           }}
         >
-          <input
-            value={manualPath}
-            onChange={(event) => setManualPath(event.target.value)}
-            placeholder="C:\path\to\git-repo"
-            required
-          />
+          <label className="form-field">
+            <span>Repository path</span>
+            <input
+              value={manualPath}
+              onChange={(event) => setManualPath(event.target.value)}
+              placeholder="C:\path\to\git-repo"
+              required
+            />
+          </label>
           <button
             type="button"
             disabled={pickerBusy}
@@ -259,7 +276,10 @@ export function SourcesPage() {
               {repos.map((repo) => (
                 <tr key={repo.id}>
                   <td className="cell-name">
-                    <Link className="list-link" to={`/projects/${repo.id}`}>
+                    {/* PROJECT route identity: the Project link carries the
+                        owning PROJECT id; repo.id stays local-binding-only
+                        (Rescan / Remove / open actions below). */}
+                    <Link className="list-link" to={`/projects/${repo.projectId}`}>
                       {repo.name}
                     </Link>
                   </td>

@@ -40,7 +40,10 @@ export function EventFeed({
             <td>{formatDateTime(event.occurredAt)}</td>
             {showProject ? (
               <td>
-                <Link to={`/projects/${event.localRepositoryId}`}>{event.projectName}</Link>
+                {/* PROJECT route identity: always the owning PROJECT id —
+                    never localRepositoryId (GitHub-origin rows carry 0
+                    there, and local binding ids are a different domain). */}
+                <Link to={`/projects/${event.projectId}`}>{event.projectName}</Link>
               </td>
             ) : null}
             <td>
