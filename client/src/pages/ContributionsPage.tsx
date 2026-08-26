@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ContributionView, DailyDetailResponse } from "@shared/api-types";
 import { client } from "../api";
@@ -36,16 +36,29 @@ export function ContributionsPage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayDetail, setDayDetail] = useState<DailyDetailResponse | null>(null);
   const [dayError, setDayError] = useState<string | null>(null);
+  /** Heading anchor for the selected-day detail panel (focus target). */
+  const dayDetailHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  /** Cell that opened the detail panel — focus returns there on deselect. */
+  const lastCalendarCellRef = useRef<HTMLElement | null>(null);
   const days = contribution.data?.days ?? [];
   const totals = contribution.data?.totals;
 
-  async function selectDay(day: string | null): Promise<void> {
+  async function selectDay(day: string | null, source?: Element): Promise<void> {
+    if (source instanceof HTMLElement) lastCalendarCellRef.current = source;
     setSelectedDay(day);
     setDayDetail(null);
     setDayError(null);
-    if (!day) return;
+    if (!day) {
+      // Deselect: hand focus back to the calendar cell that opened it.
+      lastCalendarCellRef.current?.focus();
+      return;
+    }
     try {
       setDayDetail(await client.contributionDay(day, view));
+      // One logical keyboard exit from the grid: focus moves to the detail
+      // heading so the commit list is immediately reachable. The heading
+      // carries tabindex="-1" so this does not add a tab stop.
+      requestAnimationFrame(() => dayDetailHeadingRef.current?.focus());
     } catch {
       setDayError("Could not load detail for that day.");
     }
@@ -73,7 +86,11 @@ export function ContributionsPage() {
           Refresh
         </button>
       </div>
-      {contribution.error ? <div className="error">{contribution.error}</div> : null}
+      {contribution.error ? (
+        <div className="error" role="alert">
+          {contribution.error}
+        </div>
+      ) : null}
 
       <div className="contrib-controls">
         <div className="filters" role="tablist" aria-label="Contribution source">
@@ -179,14 +196,18 @@ export function ContributionsPage() {
           )}
 
           {selectedDay ? (
-            <section className="panel">
-              <h2>
+            <section className="panel" aria-live="polite">
+              <h2 ref={dayDetailHeadingRef} tabIndex={-1}>
                 <span className="h2-mark" aria-hidden="true" />
                 {formatDayHeading(selectedDay)} ·{" "}
                 {dayDetail ? `${dayDetail.totalCommits} unique commit(s)` : "…"}
                 {dayDetail ? ` across ${dayDetail.projects.length} project(s)` : ""}
               </h2>
-              {dayError ? <div className="error">{dayError}</div> : null}
+              {dayError ? (
+                <div className="error" role="alert">
+                  {dayError}
+                </div>
+              ) : null}
               {!dayDetail ? (
                 <p className="muted">Loading…</p>
               ) : dayDetail.projects.length === 0 ? (
@@ -195,9 +216,13 @@ export function ContributionsPage() {
                 dayDetail.projects.map((project) => (
                   <div key={project.repositoryId} style={{ marginBottom: 14 }}>
                     <div className="day-project-head">
+                      {/* DailyProjectCommits.repositoryId carries the owning
+                          PROJECT id (see ContributionService.dailyDetail),
+                          so this route is already project-identity-safe. */}
                       <Link
                         className="list-link"
                         to={`/projects/${project.repositoryId}`}
+                        title={`Open project #${project.repositoryId}`}
                       >
                         {project.projectName}
                       </Link>

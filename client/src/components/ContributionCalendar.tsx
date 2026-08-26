@@ -16,7 +16,9 @@ export function ContributionCalendar({
   year: number;
   days: ContributionDayDto[];
   selectedDay: string | null;
-  onSelectDay: (day: string | null) => void;
+  /** Second argument is the activating cell, so callers can move focus
+   * somewhere meaningful (e.g. the day-detail panel). */
+  onSelectDay: (day: string | null, source?: Element) => void;
 }) {
   const byDate = useMemo(() => {
     const map = new Map<string, ContributionDayDto>();
@@ -63,7 +65,7 @@ export function ContributionCalendar({
             >
               {weeks.map((week, weekIndex) => (
                 <div className="yeargrid-col" key={weekIndex} role="row">
-                  {week.map((cell) =>
+                  {week.map((cell, dayIndex) =>
                     cell ? (
                       <button
                         key={cell.iso}
@@ -73,15 +75,18 @@ export function ContributionCalendar({
                           selectedDay === cell.iso ? "selected" : ""
                         }`}
                         title={`${formatLong(cell.iso)} · ${byDate.get(cell.iso)?.total ?? 0} tracked commit(s)`}
-                        onClick={() =>
-                          onSelectDay(selectedDay === cell.iso ? null : cell.iso)
+                        onClick={(event) =>
+                          onSelectDay(selectedDay === cell.iso ? null : cell.iso, event.currentTarget)
                         }
                         aria-label={`${formatLong(cell.iso)}, ${byDate.get(cell.iso)?.total ?? 0} tracked commits`}
                       />
                     ) : (
+                      // Blank leading/trailing placeholders are keyed by their
+                      // fixed weekday slot — unique and deterministic per year
+                      // (String(null) previously collided across a week).
                       <span
                         className="cell blank"
-                        key={`blank-${weekIndex}-${String(cell)}`}
+                        key={`blank-${year}-${weekIndex}-${dayIndex}`}
                         aria-hidden="true"
                       />
                     ),
