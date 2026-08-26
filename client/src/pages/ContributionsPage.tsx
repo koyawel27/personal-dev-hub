@@ -43,11 +43,7 @@ export function ContributionsPage() {
   const days = contribution.data?.days ?? [];
   const totals = contribution.data?.totals;
 
-  async function selectDay(
-    day: string | null,
-    source?: Element,
-    keyboardActivated?: boolean,
-  ): Promise<void> {
+  async function selectDay(day: string | null, source?: Element): Promise<void> {
     if (source instanceof HTMLElement) lastCalendarCellRef.current = source;
     setSelectedDay(day);
     setDayDetail(null);
@@ -59,14 +55,10 @@ export function ContributionsPage() {
     }
     try {
       setDayDetail(await client.contributionDay(day, view));
-      // Keyboard activation keeps focus in the calendar so arrow navigation
-      // can continue without re-tabbing; the detail update is announced by
-      // the panel's aria-live="polite" region. Mouse clicks keep the
-      // accepted handoff: focus moves to the detail heading. The heading
-      // carries tabindex="-1", so this never adds a tab stop.
-      if (!keyboardActivated) {
-        requestAnimationFrame(() => dayDetailHeadingRef.current?.focus());
-      }
+      // One logical keyboard exit from the grid: focus moves to the detail
+      // heading so the commit list is immediately reachable. The heading
+      // carries tabindex="-1" so this does not add a tab stop.
+      requestAnimationFrame(() => dayDetailHeadingRef.current?.focus());
     } catch {
       setDayError("Could not load detail for that day.");
     }
@@ -198,9 +190,7 @@ export function ContributionsPage() {
                 year={activeYear}
                 days={days}
                 selectedDay={selectedDay}
-                onSelectDay={(day, source, keyboardActivated) =>
-                  void selectDay(day, source, keyboardActivated)
-                }
+                onSelectDay={(day) => void selectDay(day)}
               />
             </section>
           )}
