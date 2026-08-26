@@ -114,12 +114,18 @@ export function ProjectDetailPage() {
           </p>
           <h1>{project.name}</h1>
           <p className="lede mono">{project.localPath ?? project.githubFullName}</p>
+          {/* Identity row: the Project's source composition leads; owner
+              metadata follows as quieter context. */}
           <p className="lede">
             <SourceBadge state={project.sourceState} />
-            {" · "}
-            <StatusBadge status={project.projectStatus} />
-            {" · "}
-            {project.projectType ?? "No type"}
+            {project.projectStatus || project.projectType ? (
+              <>
+                {" · "}
+                <span className="detail-meta">
+                  {[project.projectType, project.projectStatus].filter(Boolean).join(" · ")}
+                </span>
+              </>
+            ) : null}
             {!isGithubOnly ? (
               <>
                 {" · "}
@@ -149,8 +155,11 @@ export function ProjectDetailPage() {
               Open GitHub
             </button>
           ) : project.githubHtmlUrl ? (
+            /* External open action for GitHub-only projects: rendered as a
+               real link-button (a.btn) so it reads as intentionally
+               interactive next to its button siblings. */
             <a
-              className="btn subtle"
+              className="btn"
               href={project.githubHtmlUrl}
               target="_blank"
               rel="noreferrer"
@@ -238,6 +247,9 @@ export function ProjectDetailPage() {
           <h2>
             <span className="h2-mark" aria-hidden="true" />
             Project metadata
+            {/* Owner-managed domain marker: this form edits the PROJECT,
+                never a binding. */}
+            <span className="domain-tag mono">project data</span>
           </h2>
           <MetadataEditor
             repository={{
@@ -277,7 +289,8 @@ export function ProjectDetailPage() {
             <>
               <h2>
                 <span className="h2-mark" aria-hidden="true" />
-                Repository state
+                Local repository
+                <span className="domain-tag mono">local source</span>
               </h2>
               <div className="detail-grid">
                 <div className="muted">Path</div>
@@ -304,6 +317,33 @@ export function ProjectDetailPage() {
                   <div className="muted">Scan</div>
                 )}
               </div>
+              {hasLocal ? (
+                <div className="header-actions" style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
+                          return;
+                        }
+                        const result = await removeLocalBinding(bindingRepoId!);
+                        // Reconcile every view first; if the project auto-deleted,
+                        // this route no longer exists and we leave it cleanly.
+                        notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+                        if (result.projectDeleted) {
+                          navigate("/projects", { replace: true });
+                          return;
+                        }
+                        await load();
+                      })
+                    }
+                  >
+                    Remove local copy from dashboard
+                  </button>
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -312,6 +352,7 @@ export function ProjectDetailPage() {
               <h2>
                 <span className="h2-mark" aria-hidden="true" />
                 GitHub
+                <span className="domain-tag mono">github source</span>
               </h2>
               <div className="detail-grid">
                 <div className="muted">Repository</div>
@@ -332,33 +373,6 @@ export function ProjectDetailPage() {
             </>
           ) : null}
 
-          {hasLocal ? (
-            <div className="header-actions" style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="danger"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
-                      return;
-                    }
-                    const result = await removeLocalBinding(bindingRepoId!);
-                    // Reconcile every view first; if the project auto-deleted,
-                    // this route no longer exists and we leave it cleanly.
-                    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
-                    if (result.projectDeleted) {
-                      navigate("/projects", { replace: true });
-                      return;
-                    }
-                    await load();
-                  })
-                }
-              >
-                Remove local copy from dashboard
-              </button>
-            </div>
-          ) : null}
         </section>
       ) : null}
 

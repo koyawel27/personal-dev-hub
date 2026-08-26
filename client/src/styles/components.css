@@ -338,6 +338,28 @@ a.btn.subtle:hover {
   margin: 0 0 10px;
 }
 
+/* Domain marker beside section titles on Project Detail: names WHICH
+   entity owns the block below it (project / local binding / GitHub
+   binding) without blurring their identities. */
+.domain-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+}
+
+/* Quiet "edits pending" affordance for the metadata editor: the primary
+   button gains its accent-soft edge while real changes are unsent.
+   Purely visual; save semantics are unchanged. */
+button.primary.dirty-glow {
+  box-shadow:
+    var(--shadow-offset-press),
+    0 0 0 2px var(--accent-soft);
+}
+
 .h2-mark {
   display: inline-block;
   width: 6px;
@@ -533,6 +555,78 @@ a.btn.subtle:hover {
 /* Timestamps render as "8/25/2026, 1:05:42 PM": never let them break into
    multiple lines — Path truncates first instead (column model above). */
 .sources-table .cell-last-scan {
+  white-space: nowrap;
+}
+
+/* ---------- Projects registry table ----------
+   Width model: Project identity is the anchor column and takes the
+   leftover space; Source/Status/Type/Local state/Last activity take only
+   their content; Branch is the technical filler. Human-owned Project
+   metadata (Status/Type) renders muted so it reads as secondary registry
+   data, while binding/technical state keeps normal weight. */
+.projects-table .cell-project {
+  width: 100%;
+  min-width: 220px;
+}
+
+/* Name + Project-owned Portfolio marker on one line (marker stays
+   associated with the Project without adding a third row line). */
+.projects-table .cell-project-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.projects-table .cell-project-head .pill {
+  flex: none;
+}
+
+/* Status / Type are sparse owner-managed columns ("—" most rows):
+   content width only, no share of the flexible table space. */
+.projects-table th:nth-child(3),
+.projects-table th:nth-child(4) {
+  width: 1%;
+}
+
+.projects-table .cell-project .mono.muted {
+  /* Registry locator line (path / GitHub identity): one truncated line,
+     full value on hover via the cell's title. Keeps rows uniform and
+     stops long paths from dominating the identity block. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.projects-table td.cell-source,
+.projects-table td.cell-meta {
+  white-space: nowrap;
+}
+
+/* Technical columns read quieter at header level than the human columns
+   (Project/Source/Status). */
+.projects-table th:nth-child(5),
+.projects-table th:nth-child(6),
+.projects-table th:nth-child(7) {
+  color: var(--text-faint);
+}
+
+.projects-table .mono {
+  font-size: 11px;
+}
+
+.projects-table .list-link {
+  font-size: 13.5px;
+}
+
+.projects-table td.cell-branch {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-table td.cell-activity {
   white-space: nowrap;
 }
 
@@ -1110,6 +1204,41 @@ button.cell:hover:not(:disabled) {
   align-items: center;
 }
 
+/* Projects toolbar variant: chips stay grouped left; Search occupies the
+   free right side of the row (flex-grown, capped for comfort) and shares
+   the chips' vertical rhythm. Below 1100px it wraps onto its own full-
+   width row instead of shrinking into uselessness. */
+.projects-filters {
+  justify-content: space-between;
+}
+
+.projects-filters .form-field {
+  flex: 1 1 280px;
+  max-width: 340px;
+  margin-left: auto;
+}
+
+.projects-filters .form-field > span {
+  /* Visually hidden accessible label (placeholder stays supplementary). */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.projects-filters .form-field input {
+  width: 100%;
+  min-width: 0;
+  height: 29px; /* filter-chip height + its borders */
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
 .filters input,
 .form-row input,
 .form-row select,
@@ -1202,6 +1331,19 @@ button.cell:hover:not(:disabled) {
   background: var(--accent-soft);
   border-color: var(--accent);
   font-weight: 600;
+}
+
+.tabs button:not(.active) {
+  /* Inactive tabs keep a visible affordance instead of reading as plain
+     text (they remain real buttons; only the resting tint changes). */
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.tabs button:not(.active):hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 /* ---------- feedback ---------- */

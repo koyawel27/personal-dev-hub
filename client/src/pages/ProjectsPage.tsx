@@ -110,7 +110,7 @@ export function ProjectsPage() {
           {error}
         </div>
       ) : null}
-      <div className="filters">
+      <div className="filters projects-filters">
         {CHIPS.map((chip) => (
           <button
             key={chip.id}
@@ -121,6 +121,9 @@ export function ProjectsPage() {
             {chip.label}
           </button>
         ))}
+        {/* Accessible label retained; visually hidden so the control shares
+            the filter row's rhythm instead of stacking above its input.
+            The field takes the toolbar's free right side at desktop width. */}
         <label className="form-field">
           <span>Search</span>
           <input
@@ -142,7 +145,7 @@ export function ProjectsPage() {
         <EmptyState message="No projects match your search." />
       ) : (
         <section className="panel" style={{ padding: "6px 12px" }}>
-          <table className="table">
+          <table className="table projects-table">
             <thead>
               <tr>
                 <th>Project</th>
@@ -158,27 +161,44 @@ export function ProjectsPage() {
               {visible.map((project) => {
                 const repo = repoByProject.get(project.id);
                 const isGithubOnly = project.sourceState === "GITHUB ONLY";
+                const identifier = project.localPath ?? project.githubFullName ?? "";
                 return (
                   <tr key={project.id}>
-                    <td>
-                      <Link className="list-link" to={`/projects/${project.id}`}>
-                        {project.name}
-                      </Link>
-                      <div className="mono muted">
-                        {project.localPath ?? project.githubFullName}
+                    <td className="cell-project">
+                      {/* Name + Project-owned Portfolio marker share one
+                          line so portfolio membership no longer adds a
+                          third line (and ~20px) to a row. */}
+                      <div className="cell-project-head">
+                        <Link className="list-link" to={`/projects/${project.id}`}>
+                          {project.name}
+                        </Link>
+                        {project.includeInPortfolio ? (
+                          <span className="pill status-experiment">Portfolio</span>
+                        ) : null}
                       </div>
-                      {project.includeInPortfolio ? (
-                        <span className="pill status-experiment">Portfolio</span>
-                      ) : null}
+                      {/* Registry identity line: technical locator stays
+                          secondary — one truncated line, full value on
+                          hover (path = local binding, fullName = GitHub
+                          binding, matching the project's source state). */}
+                      <div
+                        className="mono muted"
+                        title={identifier}
+                      >
+                        {identifier}
+                      </div>
                     </td>
-                    <td>
+                    <td className="cell-source">
                       <SourceBadge state={project.sourceState} />
                     </td>
-                    <td>
+                    <td className="cell-meta">
                       <StatusBadge status={project.projectStatus} />
                     </td>
-                    <td>{project.projectType ?? <span className="muted">—</span>}</td>
-                    <td className="mono">{repo?.snapshot?.branch ?? "—"}</td>
+                    <td className="cell-meta">
+                      {project.projectType ?? <span className="muted">—</span>}
+                    </td>
+                    <td className="mono cell-branch" title={repo?.snapshot?.branch ?? undefined}>
+                      {repo?.snapshot?.branch ?? "—"}
+                    </td>
                     <td>
                       {isGithubOnly ? (
                         <span className="mono muted">n/a</span>
@@ -199,7 +219,7 @@ export function ProjectsPage() {
                         </>
                       )}
                     </td>
-                    <td title={formatDateTime(project.lastMeaningfulAt)}>
+                    <td className="cell-activity" title={formatDateTime(project.lastMeaningfulAt)}>
                       {relativeTime(project.lastMeaningfulAt)}
                     </td>
                   </tr>

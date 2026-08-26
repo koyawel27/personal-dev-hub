@@ -29,6 +29,17 @@ export function MetadataEditor({
   const [include, setInclude] = useState<boolean>(repository.includeInPortfolio);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  /**
+   * Dirty affordance: the save() diff (unchanged semantics) drives a quiet
+   * "Unsaved changes" hint and keeps Save enabled-looking while real edits
+   * are pending; the button itself stays always-clickable so the
+   * no-op-when-clean shortcut below is preserved exactly.
+   */
+  const dirty =
+    status !== (repository.projectStatus ?? "") ||
+    type !== (repository.projectType ?? "") ||
+    note.trim() !== (repository.projectNote ?? "") ||
+    include !== repository.includeInPortfolio;
 
   useEffect(() => {
     setStatus(repository.projectStatus ?? "");
@@ -115,9 +126,14 @@ export function MetadataEditor({
         />
       </label>
       <div className="row-actions" style={{ marginTop: 10 }}>
-        <button type="submit" className="primary" disabled={saving}>
+        <button type="submit" className={`primary${dirty ? " dirty-glow" : ""}`} disabled={saving}>
           {saving ? "Saving…" : "Save Metadata"}
         </button>
+        {dirty && !savedFlash ? (
+          <span className="hint-text" role="status">
+            Unsaved changes
+          </span>
+        ) : null}
         {savedFlash ? (
           <span className="notice-inline" role="status">
             Saved.
