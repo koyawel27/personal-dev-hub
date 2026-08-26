@@ -7,6 +7,7 @@ import { createApp } from "../src/app.js";
 import { closeDb, getDb } from "../src/db/client.js";
 import {
   ghSimulationMode,
+  resetGhPathCache,
   setGhExecutorForTests,
   type GhExecutor,
 } from "../src/services/GitHubService.js";
@@ -82,6 +83,9 @@ beforeEach(() => {
 afterEach(() => {
   setGhExecutorForTests(null);
   delete process.env.PERSONAL_DEV_HUB_GH_MODE;
+  // resolvedGhPath is module-level state; reset it so a GH_EXECUTABLE probe
+  // from one suite can never leak into the next (test isolation).
+  resetGhPathCache();
   closeDb();
   for (const dir of cleanup.splice(0)) {
     try {
@@ -223,6 +227,29 @@ describe("PERSONAL_DEV_HUB_GH_MODE seam", () => {
     expect(detail.body.project.sourceState).toBe("GITHUB ONLY");
   });
 
+  it("restores normal mode even when no gh binary exists in the environment", async () => {
+    // Pins the Codex-audit failure: in a gh-less sandbox the live resolver
+    // reports installed:false, which is CORRECT behavior — so restoration
+    // must be asserted through the executor stub, not a real probe.
+    process.env.GH_EXECUTABLE = "C:/nonexistent/gh-fake.exe";
+    setGhExecutorForTests(healthyGh);
+    const app = createApp();
+    await request(app).post("/api/github/tracked").send({ fullName: "koyawel27/no-gh-host" });
+
+    process.env.PERSONAL_DEV_HUB_GH_MODE = "unavailable";
+    setGhExecutorForTests(null); // env seam now drives runGh()
+    expect(await status(app)).toMatchObject({ installed: false });
+
+    delete process.env.PERSONAL_DEV_HUB_GH_MODE;
+    setGhExecutorForTests(healthyGh); // healthy process "restarts"
+    expect(await status(app)).toEqual({
+      installed: true,
+      authenticated: true,
+      accountName: "koyawel27",
+    });
+    expect(ghSimulationMode()).toBeNull();
+  });
+
   it("local scan/rescan still works in degraded mode", async () => {
     process.env.PERSONAL_DEV_HUB_GH_MODE = "unavailable";
     const app = createApp();
@@ -261,8 +288,13 @@ describe("PERSONAL_DEV_HUB_GH_MODE seam", () => {
     setGhExecutorForTests(null); // env seam now drives runGh()
     expect(await status(app)).toMatchObject({ installed: false });
 
-    // "Stop the special process, start normally": unset the override.
+    // "Stop the special process, start normally": unset the override. The
+    // executor stub stands in for the real gh binary so this pins the
+    // RESOLVER branch (mode cleared -> healthy classification) in every
+    // environment — including CI/sandboxes with no gh installation, where a
+    // live probe would report installed:false and fail the assertion.
     delete process.env.PERSONAL_DEV_HUB_GH_MODE;
+    setGhExecutorForTests(healthyGh);
     const s = await status(app);
     expect(s).toEqual({ installed: true, authenticated: true, accountName: "koyawel27" });
 
