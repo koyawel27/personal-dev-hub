@@ -47,6 +47,10 @@ async function runGh(
   if (ghExecutorOverride) {
     return ghExecutorOverride(args);
   }
+  const mode = ghSimulationMode();
+  if (mode != null) {
+    return simulatedGhResult(mode, args);
+  }
   const ghPath = resolveGhPath();
   if (!ghPath) {
     return { stdout: "", stderr: "gh not found", code: 127 };
@@ -65,8 +69,67 @@ export function setGhExecutorForTests(executor: GhExecutor | null): void {
   ghExecutorOverride = executor;
 }
 
+// ---------------------------------------------------------------------------
+// Safe degradation seam (local/dev testing ONLY).
+//
+// PERSONAL_DEV_HUB_GH_MODE lets the OWNER simulate GitHub CLI conditions
+// without touching the real gh installation, its PATH entry, or stored
+// credentials. It intercepts every gh invocation at this single chokepoint
+// AFTER the in-suite executor override (so automated tests always win):
+//
+//   unavailable      -> gh behaves as not installed
+//                       (Settings: CLI Missing, account Not connected)
+//   unauthenticated  -> gh binary answers but auth fails
+//                       (Settings: CLI Installed, account Not connected)
+//
+// Opt-in, process-local, disabled by default: production launches never set
+// it, and any other value is ignored. Local Git is unaffected — it does not
+// go through runGh(). Nothing is written to the database by this seam.
+// ---------------------------------------------------------------------------
+
+export type GhSimulationMode = "unavailable" | "unauthenticated";
+
+export function ghSimulationMode(): GhSimulationMode | null {
+  const raw = process.env.PERSONAL_DEV_HUB_GH_MODE?.trim().toLowerCase();
+  return raw === "unavailable" || raw === "unauthenticated" ? raw : null;
+}
+
+function simulatedGhResult(
+  mode: GhSimulationMode,
+  args: readonly string[],
+): { stdout: string; stderr: string; code: number } {
+  if (mode === "unavailable") {
+    // Mirrors the shape of a genuinely missing executable so downstream
+    // classification (ENOENT / non-zero / "not recognized") stays honest.
+    return {
+      stdout: "",
+      stderr: "gh: could not be found (PERSONAL_DEV_HUB_GH_MODE=unavailable)",
+      code: 127,
+    };
+  }
+  // unauthenticated: the binary exists and answers --version, but every
+  // authenticated call fails exactly like a logged-out gh.
+  if (args[0] === "--version") {
+    return { stdout: "gh version 2.63.0 (simulated seam)\n", stderr: "", code: 0 };
+  }
+  return {
+    stdout: "",
+    stderr: "? Please run gh auth login to authenticate. (simulated seam)",
+    code: 4,
+  };
+}
+
 export async function getGitHubStatus(): Promise<GitHubStatusDto> {
   try {
+    const mode = ghSimulationMode();
+    if (mode != null && !ghExecutorOverride) {
+      // Degradation simulation drives the same classification pipeline.
+      if (mode === "unavailable") {
+        return { installed: false, authenticated: false, accountName: null };
+      }
+      return { installed: true, authenticated: false, accountName: null };
+    }
+
     const version = await runGh(GH_OPERATIONS.version);
     const installed =
       version.code === 0 && /gh version/i.test(version.stdout + version.stderr);
