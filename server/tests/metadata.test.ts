@@ -9,6 +9,7 @@ import { createGitRepo, useTempDb } from "./helpers.js";
 const cleanup: string[] = [];
 let app: ReturnType<typeof createApp>;
 let repoId: number;
+let projectId: number;
 
 beforeEach(async () => {
   cleanup.push(path.dirname(useTempDb()));
@@ -22,6 +23,7 @@ beforeEach(async () => {
     .send({ path: repo });
   expect(created.status).toBe(201);
   repoId = created.body.repository.id as number;
+  projectId = created.body.repository.projectId as number;
 });
 
 afterEach(() => {
@@ -32,11 +34,12 @@ afterEach(() => {
 });
 
 function patch(body: Record<string, unknown>) {
-  return request(app).patch(`/api/repositories/${repoId}/metadata`).send(body);
+  // Metadata is PROJECT state: the canonical route carries a PROJECT id.
+  return request(app).patch(`/api/projects/${projectId}/metadata`).send(body);
 }
 
-async function activityCount(): Promise<number> {
-  const res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+async function projectActivityCount(): Promise<number> {
+  const res = await request(app).get(`/api/activity?projectId=${projectId}`);
   return (res.body.activity as unknown[]).length;
 }
 
@@ -57,16 +60,16 @@ describe("Project metadata API", () => {
       portfolioOrder: 2,
     });
     expect(patched.status).toBe(200);
-    expect(patched.body.repository.projectStatus).toBe("Paused");
-    expect(patched.body.repository.projectType).toBe("School");
-    expect(patched.body.repository.projectNote).toBe("Waiting for adviser feedback");
-    expect(patched.body.repository.includeInPortfolio).toBe(true);
-    expect(patched.body.repository.portfolioOrder).toBe(2);
+    expect(patched.body.project.projectStatus).toBe("Paused");
+    expect(patched.body.project.projectType).toBe("School");
+    expect(patched.body.project.projectNote).toBe("Waiting for adviser feedback");
+    expect(patched.body.project.includeInPortfolio).toBe(true);
+    expect(patched.body.project.portfolioOrder).toBe(2);
 
-    const listed = await request(app).get("/api/repositories");
+    const listed = await request(app).get("/api/projects");
     expect(listed.status).toBe(200);
-    const item = listed.body.repositories.find(
-      (repo: { id: number }) => repo.id === repoId,
+    const item = listed.body.projects.find(
+      (project: { id: number }) => project.id === projectId,
     );
     expect(item.projectStatus).toBe("Paused");
     expect(item.includeInPortfolio).toBe(true);
@@ -75,19 +78,19 @@ describe("Project metadata API", () => {
     closeDb();
     getDb();
     const freshApp = createApp();
-    const reopened = await request(freshApp).get(`/api/repositories/${repoId}`);
+    const reopened = await request(freshApp).get(`/api/projects/${projectId}`);
     expect(reopened.status).toBe(200);
-    expect(reopened.body.repository.projectStatus).toBe("Paused");
-    expect(reopened.body.repository.projectNote).toBe("Waiting for adviser feedback");
-    expect(reopened.body.repository.portfolioOrder).toBe(2);
+    expect(reopened.body.project.projectStatus).toBe("Paused");
+    expect(reopened.body.project.projectNote).toBe("Waiting for adviser feedback");
+    expect(reopened.body.project.portfolioOrder).toBe(2);
   });
 
   it("clears nullable fields when explicitly set to null", async () => {
     await patch({ projectStatus: "Active", projectNote: "note" });
     const cleared = await patch({ projectStatus: null, projectNote: null });
     expect(cleared.status).toBe(200);
-    expect(cleared.body.repository.projectStatus).toBeNull();
-    expect(cleared.body.repository.projectNote).toBeNull();
+    expect(cleared.body.project.projectStatus).toBeNull();
+    expect(cleared.body.project.projectNote).toBeNull();
   });
 
   it("rejects invalid status, type, portfolio flag, and order values", async () => {
@@ -112,15 +115,15 @@ describe("Project metadata API", () => {
     expect(longNote.body.error.code).toBe("INVALID_METADATA");
 
     const notObject = await request(app)
-      .patch(`/api/repositories/${repoId}/metadata`)
+      .patch(`/api/projects/${projectId}/metadata`)
       .send("just-a-string");
     expect(notObject.status).toBe(400);
     expect(notObject.body.error.code).toBe("INVALID_METADATA");
   });
 
-  it("rejects an unknown repository id", async () => {
+  it("rejects an unknown project id", async () => {
     const res = await request(app)
-      .patch("/api/repositories/999/metadata")
+      .patch("/api/projects/999/metadata")
       .send({ projectStatus: "Active" });
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("REPOSITORY_NOT_FOUND");
@@ -129,65 +132,66 @@ describe("Project metadata API", () => {
 
 describe("Manual metadata activity events", () => {
   it("emits one project_status_changed per actual change and nothing on no-op saves", async () => {
-    const before = await activityCount();
+    const before = await projectActivityCount();
 
     const first = await patch({ projectStatus: "Paused" });
     expect(first.status).toBe(200);
 
-    let res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    let res = await request(app).get(`/api/activity?projectId=${projectId}`);
     let statusEvents = eventsOfType(res, "project_status_changed");
     expect(statusEvents).toHaveLength(1);
     expect(statusEvents[0].summary).toContain("Paused");
-    expect(activityHasFingerprint(`fingerprint LIKE 'p%:${repoId}:project_status_changed:none->Paused'`)).toBe(true);
-    expect(await activityCount()).toBe(before + 1);
+    expect(activityHasFingerprint(`fingerprint LIKE 'p%:${projectId}:project_status_changed:none->Paused'`)).toBe(true);
+    expect(await projectActivityCount()).toBe(before + 1);
 
     // A different value produces exactly one more event.
     await patch({ projectStatus: "Finished" });
-    res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    res = await request(app).get(`/api/activity?projectId=${projectId}`);
     statusEvents = eventsOfType(res, "project_status_changed");
     expect(statusEvents).toHaveLength(2);
     expect(
       activityHasFingerprint(
-        `fingerprint LIKE 'p%:${repoId}:project_status_changed:Paused->Finished'`,
+        `fingerprint LIKE 'p%:${projectId}:project_status_changed:Paused->Finished'`,
       ),
     ).toBe(true);
 
     // Saving the same value again must not add an event.
-    const noopBefore = await activityCount();
+    const noopBefore = await projectActivityCount();
     await patch({ projectStatus: "Finished" });
-    expect(await activityCount()).toBe(noopBefore);
+    expect(await projectActivityCount()).toBe(noopBefore);
   });
 
   it("emits project_note_updated only when the note content changes", async () => {
-    const before = await activityCount();
+    const before = await projectActivityCount();
 
     await patch({ projectNote: "Stage 6 blur resize bug remains." });
-    let res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    let res = await request(app).get(`/api/activity?projectId=${projectId}`);
     expect(eventsOfType(res, "project_note_updated")).toHaveLength(1);
     expect(eventsOfType(res, "project_note_updated")[0].summary).toContain(
       "Stage 6 blur resize bug remains.",
     );
-    expect(await activityCount()).toBe(before + 1);
+    expect(await projectActivityCount()).toBe(before + 1);
 
     // Identical note: no new event.
     await patch({ projectNote: "Stage 6 blur resize bug remains." });
-    res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    res = await request(app).get(`/api/activity?projectId=${projectId}`);
     expect(eventsOfType(res, "project_note_updated")).toHaveLength(1);
 
     // Changed note: exactly one more.
     await patch({ projectNote: "Adviser approved the scope." });
-    res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    res = await request(app).get(`/api/activity?projectId=${projectId}`);
     expect(eventsOfType(res, "project_note_updated")).toHaveLength(2);
   });
 
   it("never emits metadata events for unrelated repository rescans", async () => {
     await patch({ projectStatus: "Experiment" });
-    const baselineRes = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    const baselineRes = await request(app).get(`/api/activity?projectId=${projectId}`);
     const baselineMeta = eventsOfType(baselineRes, "project_status_changed").length;
     expect(baselineMeta).toBe(1);
 
+    // Rescan targets the LOCAL BINDING id; metadata events stay untouched.
     await request(app).post(`/api/repositories/${repoId}/refresh`);
-    const res = await request(app).get(`/api/activity?repositoryId=${repoId}`);
+    const res = await request(app).get(`/api/activity?projectId=${projectId}`);
     expect(eventsOfType(res, "project_status_changed")).toHaveLength(1);
   });
 });

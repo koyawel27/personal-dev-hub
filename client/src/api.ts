@@ -69,29 +69,32 @@ export const client = {
   scanAll: () => api<{ summary: ScanSummary }>("/api/scans", { method: "POST" }),
   repositories: () =>
     api<{ repositories: RepositoryListItem[] }>("/api/repositories"),
-  repository: (id: number) =>
-    api<{ repository: RepositoryDetail }>(`/api/repositories/${id}`),
   addManual: (path: string) =>
     api<{ repository: RepositoryDetail }>("/api/repositories/manual", {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
-  refresh: (id: number) =>
-    api<{ repository: RepositoryDetail }>(`/api/repositories/${id}/refresh`, {
-      method: "POST",
-    }),
-  updateMetadata: (id: number, body: UpdateMetadataRequest) =>
-    api<{ repository: RepositoryDetail }>(`/api/repositories/${id}/metadata`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
-  deleteRepository: (id: number, confirmDeleteProject?: boolean) =>
+  // Local-binding operations (rescan / remove-from-dashboard): the id is a
+  // LOCAL REPOSITORY id, never a Project id. Project state lives under
+  // client.project / client.updateProjectMetadata.
+  refresh: (localRepositoryId: number) =>
+    api<{ repository: RepositoryDetail }>(
+      `/api/repositories/${localRepositoryId}/refresh`,
+      { method: "POST" },
+    ),
+  deleteRepository: (localRepositoryId: number, confirmDeleteProject?: boolean) =>
     api<DeleteLocalBindingResponse>(
-      `/api/repositories/${id}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
+      `/api/repositories/${localRepositoryId}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
       { method: "DELETE" },
     ),
-  open: (id: number, action: "folder" | "terminal" | "vscode" | "github") =>
-    api<{ ok: true }>(`/api/repositories/${id}/open/${action}`, { method: "POST" }),
+  open: (
+    localRepositoryId: number,
+    action: "folder" | "terminal" | "vscode" | "github",
+  ) =>
+    api<{ ok: true }>(
+      `/api/repositories/${localRepositoryId}/open/${action}`,
+      { method: "POST" },
+    ),
   activity: (params?: { repositoryId?: number; projectId?: number; from?: string; to?: string }) => {
     const search = new URLSearchParams();
     if (params?.repositoryId) search.set("repositoryId", String(params.repositoryId));
@@ -160,10 +163,10 @@ export const client = {
     const q = search.toString();
     return api<{ projects: ProjectListItemDto[] }>(`/api/projects${q ? `?${q}` : ""}`);
   },
-  project: (id: number) =>
-    api<{ project: ProjectDetailDto }>(`/api/projects/${id}`),
-  updateProjectMetadata: (id: number, body: UpdateMetadataRequest) =>
-    api<{ project: ProjectDetailDto }>(`/api/projects/${id}/metadata`, {
+  project: (projectId: number) =>
+    api<{ project: ProjectDetailDto }>(`/api/projects/${projectId}`),
+  updateProjectMetadata: (projectId: number, body: UpdateMetadataRequest) =>
+    api<{ project: ProjectDetailDto }>(`/api/projects/${projectId}/metadata`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
@@ -178,14 +181,14 @@ export const client = {
       "/api/github/tracked",
       { method: "POST", body: JSON.stringify({ fullName }) },
     ),
-  untrackGithub: (id: number, confirmDeleteProject?: boolean) =>
+  untrackGithub: (githubBindingId: number, confirmDeleteProject?: boolean) =>
     api<{ ok: true; projectDeleted: boolean }>(
-      `/api/github/tracked/${id}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
+      `/api/github/tracked/${githubBindingId}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
       { method: "DELETE" },
     ),
-  refreshTrackedGithub: (id: number) =>
+  refreshTrackedGithub: (githubBindingId: number) =>
     api<{ ok: boolean; reason?: string; newCommits?: number }>(
-      `/api/github/tracked/${id}/refresh`,
+      `/api/github/tracked/${githubBindingId}/refresh`,
       { method: "POST" },
     ),
 };

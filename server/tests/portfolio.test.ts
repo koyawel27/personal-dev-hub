@@ -26,10 +26,8 @@ async function track(name: string): Promise<{ id: number }> {
   cleanup.push(repo);
   const res = await request(app).post("/api/repositories/manual").send({ path: repo });
   expect(res.status).toBe(201);
-  const repositoryId = res.body.repository.id as number;
-  // V1.1: metadata lives on the Project; resolve its id from the binding.
-  const detail = await request(app).get(`/api/repositories/${repositoryId}`);
-  const projectId = detail.body.repository.projectId as number;
+  // V1.1: metadata lives on the Project; the add response carries its id.
+  const projectId = res.body.repository.projectId as number;
   expect(projectId).toBeTruthy();
   await request(app)
     .patch(`/api/projects/${projectId}/metadata`)
@@ -44,12 +42,12 @@ describe("Portfolio endpoint", () => {
     const b = await track("b");
     const c = await track("c");
 
-    await request(app).patch(`/api/repositories/${b.id}/metadata`).send({
+    await request(app).patch(`/api/projects/${b.id}/metadata`).send({
       includeInPortfolio: true,
       portfolioOrder: 1,
       projectNote: "Second position",
     }).expect(200);
-    await request(app).patch(`/api/repositories/${a.id}/metadata`).send({
+    await request(app).patch(`/api/projects/${a.id}/metadata`).send({
       includeInPortfolio: true,
       portfolioOrder: 2,
     }).expect(200);
@@ -77,7 +75,7 @@ describe("Portfolio endpoint", () => {
 
   it("includes local-only projects and reflects reordering through the metadata API", async () => {
     const repo = await track("solo");
-    await request(app).patch(`/api/repositories/${repo.id}/metadata`).send({
+    await request(app).patch(`/api/projects/${repo.id}/metadata`).send({
       includeInPortfolio: true,
       portfolioOrder: 5,
     }).expect(200);
@@ -87,13 +85,13 @@ describe("Portfolio endpoint", () => {
     expect(res.body.projects[0].githubHtmlUrl).toBeNull();
 
     const other = await track("other");
-    await request(app).patch(`/api/repositories/${other.id}/metadata`).send({
+    await request(app).patch(`/api/projects/${other.id}/metadata`).send({
       includeInPortfolio: true,
       portfolioOrder: 4,
     }).expect(200);
     // Swap positions via plain PATCHes (the same primitive the UI uses).
-    await request(app).patch(`/api/repositories/${repo.id}/metadata`).send({ portfolioOrder: 4 }).expect(200);
-    await request(app).patch(`/api/repositories/${other.id}/metadata`).send({ portfolioOrder: 5 }).expect(200);
+    await request(app).patch(`/api/projects/${repo.id}/metadata`).send({ portfolioOrder: 4 }).expect(200);
+    await request(app).patch(`/api/projects/${other.id}/metadata`).send({ portfolioOrder: 5 }).expect(200);
 
     res = await request(app).get("/api/portfolio");
     expect((res.body.projects as { id: number }[]).map((p) => p.id)).toEqual([

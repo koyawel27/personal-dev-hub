@@ -60,9 +60,10 @@ describe("API validation and persistence", () => {
   });
 
   it("rejects an unknown repository id", async () => {
+    // The repository detail route was retired with the V1.1 cleanup; the
+    // canonical Project detail lives at /api/projects/:projectId.
     const res = await request(createApp()).get("/api/repositories/999");
     expect(res.status).toBe(404);
-    expect(res.body.error.code).toBe("REPOSITORY_NOT_FOUND");
   });
 
   it("rejects a duplicate scan source", async () => {
@@ -97,8 +98,10 @@ describe("API validation and persistence", () => {
     const created = await request(app).post("/api/repositories/manual").send({ path: repo });
     const id = created.body.repository.id as number;
     await request(app).post(`/api/repositories/${id}/refresh`);
-    const detail = await request(app).get(`/api/repositories/${id}`);
-    expect(detail.body.repository.commits).toHaveLength(1);
+    // Detail is PROJECT-centric: read through the project id.
+    const projectId = created.body.repository.projectId as number;
+    const detail = await request(app).get(`/api/projects/${projectId}`);
+    expect(detail.body.project.commits).toHaveLength(1);
 
     const count = getDb()
       .prepare("SELECT COUNT(*) AS n FROM commits WHERE local_repository_id = ?")

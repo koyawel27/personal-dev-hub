@@ -111,14 +111,17 @@ describe("Contribution aggregation", () => {
     await track(repoA);
     await track(repoB);
 
-    // Sanity: the twin commits really are the same SHA.
-    const listed = await request(app).get("/api/repositories");
+    // Sanity: the twin commits really are the same SHA. Read through the
+    // PROJECT detail API (repository detail route was retired in V1.1).
+    const projects = (await request(app).get("/api/projects")).body.projects as {
+      id: number;
+    }[];
     const details = await Promise.all(
-      (listed.body.repositories as { id: number }[]).map((repo) =>
-        request(app).get(`/api/repositories/${repo.id}`),
-      ),
+      projects.map((project) => request(app).get(`/api/projects/${project.id}`)),
     );
-    const shas = details.map((detail) => detail.body.repository.commits[0].sha as string);
+    const shas = details.map(
+      (detail) => detail.body.project.commits[0].sha as string,
+    );
     expect(shas[0]).toBe(shas[1]);
 
     const res = await request(app).get("/api/contributions");

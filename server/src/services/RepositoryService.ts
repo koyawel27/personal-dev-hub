@@ -14,11 +14,9 @@ import type {
   SnapshotDto,
   ProjectStatus,
   ProjectType,
-  UpdateMetadataRequest,
   RecentlyActiveProjectDto,
   AttentionReason,
 } from "../../../shared/api-types.js";
-import { PROJECT_STATUSES, PROJECT_TYPES } from "../../../shared/api-types.js";
 import { parseGitHubRemote } from "../../../shared/github-remote.js";
 import {
   pathIdentity,
@@ -41,7 +39,6 @@ import {
 } from "./ActivityService.js";
 import {
   finalizeProjectAfterFinalBindingRemoval,
-  updateProjectMetadata,
 } from "./ProjectService.js";
 import { fetchGitHubRepoMetadata } from "./GitHubService.js";
 import { inspectRepository, isRepository, type GitInspection } from "./GitService.js";
@@ -907,39 +904,6 @@ export function deleteRepository(
         .projectDeleted,
     };
   });
-}
-
-const METADATA_ERROR =
-  "Metadata is invalid. Provide valid projectStatus/projectType values, a note of at most 500 characters, and a boolean portfolio flag.";
-
-function metadataError(): AppError {
-  return new AppError(ErrorCodes.INVALID_METADATA, METADATA_ERROR);
-}
-
-type MetadataChange = {
-  eventType: "project_status_changed" | "project_note_updated";
-  summary: string;
-  fingerprint: string;
-  metadata: Record<string, unknown>;
-};
-
-export async function updateMetadata(
-  id: number,
-  input: unknown,
-): Promise<RepositoryDetail> {
-  // V1.1 (owner decision Q3): manual metadata belongs to the PROJECT.
-  // This legacy binding-level route is a thin delegation to the project
-  // layer so pre-V1.1 clients keep working during migration.
-  const repo = getRepoRow(id);
-  if (repo.project_id == null) {
-    throw new AppError(
-      ErrorCodes.REPOSITORY_NOT_FOUND,
-      "This repository has no project mapping.",
-      404,
-    );
-  }
-  await updateProjectMetadata(repo.project_id, input);
-  return getRepositoryDetail(id);
 }
 
 export async function refreshRepository(id: number): Promise<RepositoryDetail> {

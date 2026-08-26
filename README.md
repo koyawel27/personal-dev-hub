@@ -56,7 +56,7 @@ npm run build
 | Activity | Global development journal built from fingerprinted events across both origins (commit observed, working-tree transitions, branch changes, GitHub repo tracked/untracked); unchanged rescans and no-op refreshes add nothing |
 | Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (duplicates collapsed by repository identity + SHA); counts are commits, never hours; not a full GitHub profile graph |
 | Portfolio | Selected-work view over projects: notes, type/status, technology hints (manifest probes, or GitHub's reported primary language for GitHub-only items), first/latest known commit dates, simple ordering. GitHub-only projects are eligible without a local clone |
-| Sources | Multiple scan roots with depth control and heavy-folder skipping, manual add of individual repositories, and the GitHub repository picker |
+| Sources | Multiple scan roots with depth control, native folder browsing, manual add of individual repositories (each a local binding of a Project), and the GitHub repository picker. Project metadata lives on the Project itself (`PATCH /api/projects/:projectId/metadata`), never on a repository row |
 | Settings | Git executable status, GitHub connection summary (CLI installed / account connected via your existing `gh` login), default scan depth, app data location, rescan controls |
 
 ## Privacy behavior

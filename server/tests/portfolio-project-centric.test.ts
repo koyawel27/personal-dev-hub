@@ -230,20 +230,17 @@ describe("project-centric portfolio mutations", () => {
     expect(portfolio.some((item) => item.id === projectId)).toBe(true);
   });
 
-  it("legacy repository metadata route no longer receives portfolio ids from the UI contract", async () => {
-    // Guard against reintroducing the repository-as-project assumption:
-    // the legacy route must not be how a GITHUB ONLY project is mutated.
+  it("retired repository metadata route no longer exists (identity guard)", async () => {
+    // V1.1 cleanup: PATCH /api/repositories/:id/metadata is GONE. The only
+    // metadata mutation path is the Project route carrying a PROJECT id, so
+    // the repository-as-project identity mistake cannot silently succeed.
     const { projectId } = await trackGithubOnly("koyawel27/no-repo-binding");
     const legacyAttempt = await request(app)
       .patch(`/api/repositories/${projectId}/metadata`)
       .send({ includeInPortfolio: false });
-    // Either 404 REPOSITORY_NOT_FOUND (id-space mismatch caught) or an
-    // explicit delegation — but NEVER a silent success that mutated the
-    // project via repository identity.
-    if (legacyAttempt.status === 404) {
-      expect(legacyAttempt.body.error.code).toBe("REPOSITORY_NOT_FOUND");
-      const detail = await request(app).get(`/api/projects/${projectId}`);
-      expect(detail.body.project.includeInPortfolio).toBe(true); // untouched
-    }
+    expect(legacyAttempt.status).toBe(404); // no route, no shim, no mutation
+
+    const detail = await request(app).get(`/api/projects/${projectId}`);
+    expect(detail.body.project.includeInPortfolio).toBe(true); // untouched
   });
 });

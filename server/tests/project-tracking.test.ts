@@ -47,7 +47,7 @@ async function addLocalRepo(options?: { remote?: string; dirty?: boolean }) {
   }
   const res = await request(app).post("/api/repositories/manual").send({ path: repoPath });
   expect(res.status).toBe(201);
-  return { repoId: res.body.repository.id as number, repoPath };
+  return { repoId: res.body.repository.id as number, repoPath, projectId: res.body.repository.projectId as number };
 }
 
 describe("project-centric tracking", () => {
@@ -134,7 +134,7 @@ describe("project-centric tracking", () => {
   });
 
   it("disconnects GitHub from LOCAL + GITHUB and preserves metadata", async () => {
-    const { repoId } = await addLocalRepo({
+    const { repoPath } = await addLocalRepo({
       remote: "https://github.com/octocat/disconnect-me.git",
     });
     const track = await request(app)
@@ -156,7 +156,7 @@ describe("project-centric tracking", () => {
     expect(detail.body.project.projectNote).toBe("keep me");
 
     // The local repository itself is untouched.
-    expect(fs.existsSync((await request(app).get(`/api/repositories/${repoId}`)).body.repository.localPath)).toBe(true);
+    expect(fs.existsSync(repoPath)).toBe(true);
   });
 
   it("untracks GITHUB ONLY: auto-deletes empty projects, confirms curated ones", async () => {

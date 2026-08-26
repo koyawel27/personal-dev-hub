@@ -21,7 +21,6 @@ import {
   refreshRepository,
   scanAllSources,
   scanSource,
-  updateMetadata,
 } from "./services/RepositoryService.js";
 import { getDashboard } from "./services/DashboardService.js";
 import { launchRepositoryAction } from "./services/SystemLauncher.js";
@@ -142,16 +141,9 @@ export function createApp(): express.Express {
     }
   });
 
-  app.get("/api/repositories/:id", async (req, res, next) => {
-    try {
-      const repository = await getRepositoryDetail(
-        requireId(req.params.id, "repository"),
-      );
-      res.json({ repository });
-    } catch (err) {
-      next(err);
-    }
-  });
+  // NOTE: no GET /api/repositories/:id detail route — the Project is the
+  // domain entity and lives at GET /api/projects/:projectId. (The legacy
+  // repository-as-project shim was retired in V1.1 cleanup.)
 
   app.post("/api/repositories/:id/refresh", async (req, res, next) => {
     try {
@@ -164,17 +156,10 @@ export function createApp(): express.Express {
     }
   });
 
-  app.patch("/api/repositories/:id/metadata", async (req, res, next) => {
-    try {
-      const repository = await updateMetadata(
-        requireId(req.params.id, "repository"),
-        req.body,
-      );
-      res.json({ repository });
-    } catch (err) {
-      next(err);
-    }
-  });
+  // NOTE: no PATCH /api/repositories/:id/metadata — manual metadata is
+  // PROJECT state and belongs to PATCH /api/projects/:projectId/metadata.
+  // (The legacy repository-as-project shim was retired in V1.1 cleanup;
+  // see server/tests/api-identity-guard.test.ts.)
 
   app.delete("/api/repositories/:id", (req, res, next) => {
     try {
