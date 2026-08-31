@@ -635,28 +635,60 @@ button.primary.dirty-glow {
   white-space: nowrap;
 }
 
-@media (max-width: 1000px) {
-  /* Genuinely narrow viewports: allow stacking again, keep rows readable. */
-  .sources-table td.row-actions,
-  .sources-table .row-actions {
+@media (max-width: 1100px) {
+  /* The desktop sidebar leaves Sources with a narrow content column just
+     above the shell's mobile breakpoint. Let actions and names wrap here so
+     the final action stays visible without widening the document. */
+  .local-repositories-table td.row-actions,
+  .local-repositories-table .row-actions {
     flex-wrap: wrap;
     white-space: normal;
   }
 
-  .sources-table .cell-name {
+  .local-repositories-table .cell-name {
+    min-width: 112px;
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 }
 
 /* ---------- GitHub repository picker (V1.1) ---------- */
 
+.sources-page .source-section-note {
+  margin: -2px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .picker-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.sources-page .picker-head h2 {
+  margin-bottom: 8px;
+}
+
+.sources-page .picker-head .source-section-note {
+  margin: 0;
+}
+
+.github-degraded {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.github-degraded strong {
+  color: var(--text);
+  font-size: 13px;
 }
 
 .picker-controls {
@@ -760,6 +792,27 @@ button.primary.dirty-glow {
   display: inline-flex;
   gap: 6px;
   flex: none;
+}
+
+/* Secondary refresh actions (Refresh list / row Refresh): idle picker buttons
+   are transparent + borderless + muted, so next to the surrounding muted copy
+   they read as passive text. Keep them secondary (never primary) with the
+   smallest text-link affordance: a quiet underline at rest that ties into the
+   app's accent-on-hover link behavior. Scoped to the refresh actions only —
+   danger actions (Untrack / Disconnect GitHub) keep their own treatment. */
+.sources-page .btn.subtle.refresh-action {
+  background: transparent;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+  transition: background 80ms ease, color 80ms ease, text-decoration-color 80ms ease;
+}
+
+.sources-page .btn.subtle.refresh-action:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent-strong);
+  text-decoration-color: var(--accent-strong);
 }
 
 /* Restrained destructive treatment: visible, but never dominant. */
@@ -1273,6 +1326,17 @@ button.cell:hover:not(:disabled) {
   align-items: center;
 }
 
+/* Sources forms: Browse/Add sit beside LABELED fields, and .form-field is a
+   label+control stack. Centering the row (the shared default above) pins each
+   button to the stack's middle — roughly one label-height above its input.
+   Bottom-aligning the row ties control bottoms to the input bottoms instead.
+   Buttons and inputs share the same font/line-height/border/padding geometry,
+   so equal tops follow from equal bottoms; no pixel offsets needed. Scoped to
+   the Sources page so Settings/Activity form-rows keep their approved look. */
+.sources-page .form-row {
+  align-items: flex-end;
+}
+
 .form-row input.depth {
   min-width: 80px;
   width: 80px;
@@ -1310,6 +1374,72 @@ button.cell:hover:not(:disabled) {
   display: grid;
   grid-template-columns: 160px 1fr;
   gap: 8px 16px;
+}
+
+/* ---------- Settings: tool status + local preferences ---------- */
+
+.settings-tool-list {
+  border-top: 1px solid var(--border);
+}
+
+.settings-tool-row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px 18px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tool-name,
+.settings-tool-status {
+  min-width: 0;
+}
+
+.settings-tool-name strong,
+.settings-tool-name span {
+  display: block;
+}
+
+.settings-tool-name strong {
+  font-size: 13px;
+}
+
+.settings-tool-name span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.settings-tool-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.settings-tool-status .mono {
+  overflow-wrap: anywhere;
+}
+
+.settings-tool-note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-local-grid {
+  margin-bottom: 12px;
+}
+
+.settings-subheading {
+  margin: 0 0 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .list-link {
@@ -1717,6 +1847,21 @@ button.cell:hover:not(:disabled) {
 
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-tool-row {
+    grid-template-columns: 1fr;
+  }
+
+  .picker-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .picker-head > button {
+    align-self: flex-start;
   }
 }
 

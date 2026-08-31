@@ -9,6 +9,12 @@ import { removeLocalBinding } from "../lib/removeLocalBinding";
 import { useInvalidate } from "../useApi";
 import { notifyMutations } from "../lib/mutations";
 
+function discoveryOriginLabel(discoveryType: string): string {
+  if (discoveryType === "scanned") return "Scan location";
+  if (discoveryType === "manual") return "Manually added";
+  return discoveryType;
+}
+
 export function SourcesPage() {
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [repos, setRepos] = useState<RepositoryListItem[]>([]);
@@ -89,15 +95,17 @@ export function SourcesPage() {
   const manualRepos = repos.filter((repo) => repo.discoveryType === "manual");
 
   return (
-    <div>
+    <div className="sources-page">
       <div className="page-header">
         <div>
           <h1>Sources</h1>
-          <p className="lede">Scan locations and individually added repositories.</p>
+          <p className="lede">
+            Manage automatic scan locations, tracked local repositories, and
+            optional GitHub repositories.
+          </p>
         </div>
         <button
           type="button"
-          className="primary"
           disabled={busy}
           onClick={() =>
             run(async () => {
@@ -128,7 +136,13 @@ export function SourcesPage() {
       ) : null}
 
       <section className="panel">
-        <h2>Scan Locations</h2>
+        <h2>
+          <span className="h2-mark" aria-hidden="true" />
+          Scan Locations
+        </h2>
+        <p className="source-section-note">
+          Folders Personal Dev Hub checks automatically for local Git repositories.
+        </p>
         <form
           className="form-row"
           onSubmit={(event) => {
@@ -182,13 +196,15 @@ export function SourcesPage() {
                 <th>Depth</th>
                 <th>Last scan</th>
                 <th>Repositories</th>
-                <th></th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {sources.map((source) => (
                 <tr key={source.id}>
-                  <td className="mono cell-path">{source.path}</td>
+                  <td className="mono cell-path" title={source.path}>
+                    {source.path}
+                  </td>
                   <td>{source.scanDepth}</td>
                   <td className="cell-last-scan">{formatDateTime(source.lastScannedAt)}</td>
                   <td>{source.repositoryCount}</td>
@@ -228,7 +244,13 @@ export function SourcesPage() {
       </section>
 
       <section className="panel">
-        <h2>Individual Repositories</h2>
+        <h2>
+          <span className="h2-mark" aria-hidden="true" />
+          Local Repositories
+        </h2>
+        <p className="source-section-note">
+          Local Git repositories tracked directly or discovered through a scan location.
+        </p>
         <form
           className="form-row"
           onSubmit={(event) => {
@@ -257,19 +279,19 @@ export function SourcesPage() {
             {pickerBusy ? "Browsing…" : "Browse…"}
           </button>
           <button type="submit" className="primary" disabled={busy}>
-            Add Individual Repository
+            Add Local Repository
           </button>
         </form>
         {manualRepos.length === 0 && repos.length === 0 ? (
           <p className="empty">{EMPTY_STATES.noProjects}</p>
         ) : (
-          <table className="table sources-table">
+          <table className="table sources-table local-repositories-table">
             <thead>
               <tr>
                 <th>Project</th>
                 <th>Path</th>
-                <th>Added as</th>
-                <th></th>
+                <th>Added via</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -283,8 +305,10 @@ export function SourcesPage() {
                       {repo.name}
                     </Link>
                   </td>
-                  <td className="mono cell-path" title={repo.localPath}>{repo.localPath}</td>
-                  <td className="cell-added">{repo.discoveryType}</td>
+                  <td className="mono cell-path" title={repo.localPath}>
+                    {repo.localPath}
+                  </td>
+                  <td className="cell-added">{discoveryOriginLabel(repo.discoveryType)}</td>
                   <td className="row-actions">
                     <button
                       type="button"
@@ -297,6 +321,7 @@ export function SourcesPage() {
                       type="button"
                       className="danger"
                       disabled={busy}
+                      title="Remove this local repository from the dashboard. Files on disk are never deleted."
                       onClick={() =>
                         run(async () => {
                           const result = await removeLocalBinding(repo.id);
@@ -308,7 +333,7 @@ export function SourcesPage() {
                         })
                       }
                     >
-                      Remove from dashboard
+                      Remove
                     </button>
                   </td>
                 </tr>

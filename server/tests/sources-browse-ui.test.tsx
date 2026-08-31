@@ -35,6 +35,10 @@ vi.mock("../../client/src/api.js", () => ({
     scanAll: () => Promise.resolve({ summary: {} }),
     refresh: () => Promise.resolve({}),
     deleteRepository: () => Promise.resolve({ ok: true, projectDeleted: false }),
+    githubStatus: () =>
+      Promise.resolve({
+        status: { installed: false, authenticated: false, accountName: null },
+      }),
     githubPicker: () =>
       Promise.reject(new Error("picker not exercised in this suite")),
   },

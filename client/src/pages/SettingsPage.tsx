@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import type { GitHubStatusDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
-import { EMPTY_STATES } from "@shared/status-terms";
 
 /**
  * Minimal Settings per spec section 12: Git status, GitHub CLI status,
@@ -10,6 +10,7 @@ import { EMPTY_STATES } from "@shared/status-terms";
  */
 export function SettingsPage() {
   const [status, setStatus] = useState<GitHubStatusDto | null>(null);
+  const [gitAvailable, setGitAvailable] = useState<boolean | null>(null);
   const [settings, setSettings] = useState<{
     defaultScanDepth: number;
     gitExecutable: string;
@@ -20,10 +21,12 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [github, appSettings] = await Promise.all([
+    const [health, github, appSettings] = await Promise.all([
+      client.health(),
       client.githubStatus(),
       client.settings(),
     ]);
+    setGitAvailable(health.git === "available");
     setStatus(github.status);
     setSettings(appSettings.settings);
     setDepthDraft(String(appSettings.settings.defaultScanDepth));
@@ -49,7 +52,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div>
+    <div className="settings-page">
       <div className="page-header">
         <div>
           <h1>Settings</h1>
@@ -59,11 +62,10 @@ export function SettingsPage() {
         </div>
         <button
           type="button"
-          className="primary"
           disabled={busy}
           onClick={() => run(load)}
         >
-          Refresh Status
+          Recheck tools
         </button>
       </div>
       {error ? (
@@ -80,59 +82,59 @@ export function SettingsPage() {
       <section className="panel">
         <h2>
           <span className="h2-mark" aria-hidden="true" />
-          GitHub connection
+          Tool Status
         </h2>
-        <div className="detail-grid">
-          <div className="muted">GitHub CLI</div>
-          <div>
-            <span className={`pill ${status?.installed ? "clean" : "neutral"}`}>
-              {status == null ? "…" : status.installed ? "Installed" : "Missing"}
-            </span>
+        <div className="settings-tool-list" aria-live="polite">
+          <div className="settings-tool-row">
+            <div className="settings-tool-name">
+              <strong>Git</strong>
+              <span>Local repository tracking</span>
+            </div>
+            <div className="settings-tool-status">
+              <span className={`pill ${gitAvailable ? "clean" : "neutral"}`}>
+                {gitAvailable == null ? "…" : gitAvailable ? "Available" : "Unavailable"}
+              </span>
+              <span className="mono muted">{settings?.gitExecutable ?? "—"}</span>
+            </div>
           </div>
-          <div className="muted">GitHub account</div>
-          <div>
-            {status == null ? (
-              "…"
-            ) : status.authenticated ? (
-              <>
-                <span className="pill clean">Connected</span>
-                {status.accountName ? (
-                  <span className="mono"> {status.accountName}</span>
-                ) : null}
-              </>
-            ) : (
-              <span className="pill neutral">Not connected</span>
-            )}
+          <div className="settings-tool-row">
+            <div className="settings-tool-name">
+              <strong>GitHub CLI</strong>
+              <span>Optional remote enrichment</span>
+            </div>
+            <div className="settings-tool-status">
+              <span className={`pill ${status?.authenticated ? "clean" : "neutral"}`}>
+                {status == null
+                  ? "…"
+                  : !status.installed
+                    ? "Not available"
+                    : status.authenticated
+                      ? "Connected"
+                      : "Installed · not connected"}
+              </span>
+              {status?.accountName ? (
+                <span className="mono muted">{status.accountName}</span>
+              ) : null}
+            </div>
           </div>
         </div>
-        <p className="empty-state-hint" style={{ marginTop: 8 }}>
-          Connection is read from the existing GitHub CLI login — Personal Dev Hub
-          never stores a token. Repository selection lives under{" "}
-          <a href="/sources">Sources → Browse GitHub Repositories</a>.
+        <p className="settings-tool-note">
+          Personal Dev Hub reads the existing GitHub CLI login and never stores a token.
+          Local tracking continues without GitHub. Manage remote repositories under{" "}
+          <Link to="/sources">Sources → GitHub Repositories</Link>.
         </p>
       </section>
 
       <section className="panel">
         <h2>
           <span className="h2-mark" aria-hidden="true" />
-          Tooling
+          Local Settings
         </h2>
-        <div className="detail-grid">
-          <div className="muted">Git executable</div>
-          <div className="mono">{settings?.gitExecutable ?? "—"}</div>
+        <div className="detail-grid settings-local-grid">
           <div className="muted">App data</div>
           <div className="mono">data/dashboard.sqlite (project folder)</div>
         </div>
-        {status && !status.installed ? (
-          <p className="empty">{EMPTY_STATES.githubUnavailable}</p>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <h2>
-          <span className="h2-mark" aria-hidden="true" />
-          Scanning
-        </h2>
+        <h3 className="settings-subheading">Scanning</h3>
         <form
           className="form-row"
           onSubmit={(event) => {

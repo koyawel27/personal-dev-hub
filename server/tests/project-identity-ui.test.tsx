@@ -27,6 +27,10 @@ vi.mock("../../client/src/api.js", () => ({
     sources: (...args: unknown[]) => sources(...args),
     repositories: (...args: unknown[]) => repositories(...args),
     githubPicker: (...args: unknown[]) => githubPicker(...args),
+    githubStatus: () =>
+      Promise.resolve({
+        status: { installed: false, authenticated: false, accountName: null },
+      }),
     scanSource: () => Promise.resolve({ summary: {} }),
     deleteSource: () => Promise.resolve({ ok: true }),
     refresh: () => Promise.resolve({}),

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PickerEntryDto } from "@shared/api-types";
+import type { GitHubStatusDto, PickerEntryDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { notifyMutations } from "../lib/mutations";
-import { IconProjects } from "../components/icons";
 import { useApi } from "../useApi";
 
 const FILTERS = [
@@ -19,6 +18,30 @@ const FILTERS = [
 ] as const;
 
 type FilterKey = (typeof FILTERS)[number]["key"];
+
+function unavailableMessage(
+  status: GitHubStatusDto | null,
+): { title: string; detail: string } {
+  if (status != null && !status.installed) {
+    return {
+      title: "GitHub CLI not available",
+      detail:
+        "Install GitHub CLI when you want to browse remote repositories. Local repository tracking continues normally.",
+    };
+  }
+  if (status != null && !status.authenticated) {
+    return {
+      title: "GitHub CLI installed · not connected",
+      detail:
+        "Sign in with the existing GitHub CLI, then refresh this list. Local repository tracking continues normally.",
+    };
+  }
+  return {
+    title: "GitHub repositories unavailable",
+    detail:
+      "The repository list could not be refreshed. Existing tracked projects and local sources are unchanged.",
+  };
+}
 
 function matches(entry: PickerEntryDto, filter: FilterKey): boolean {
   switch (filter) {
@@ -56,6 +79,13 @@ export function GithubPickerSection() {
     [],
     { invalidateOn: ["picker", "projects"] },
   );
+  const {
+    data: statusData,
+    loading: statusLoading,
+    refetch: reloadStatus,
+  } = useApi(() => client.githubStatus(), [], {
+    invalidateOn: ["picker"],
+  });
   const [filter, setFilter] = useState<FilterKey>("owned");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -114,6 +144,8 @@ export function GithubPickerSection() {
   }, [pendingDelete]);
 
   const entries = data?.entries ?? [];
+  const githubUnavailable = error != null || (data != null && !data.available);
+  const degradedMessage = unavailableMessage(statusData?.status ?? null);
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries
@@ -278,23 +310,32 @@ export function GithubPickerSection() {
   return (
     <section className="panel">
       <div className="picker-head">
-        <h2 className="h-mark">
-          <IconProjects /> Browse GitHub Repositories
-        </h2>
-        <button className="btn subtle" onClick={() => void reload()} disabled={loading}>
+        <div>
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            GitHub Repositories
+          </h2>
+          <p className="source-section-note">
+            Select existing GitHub repositories to track. Personal Dev Hub never
+            clones them.
+          </p>
+        </div>
+        <button
+          className="btn subtle refresh-action"
+          onClick={() => void Promise.all([reload(), reloadStatus()])}
+          disabled={loading || statusLoading}
+        >
           Refresh list
         </button>
       </div>
 
-      {error != null ? (
-        <p className="empty-line">GitHub is unavailable right now ({error}).</p>
-      ) : loading ? (
+      {loading || (githubUnavailable && statusLoading) ? (
         <p className="empty-line">Loading repositories…</p>
-      ) : data != null && !data.available ? (
-        <p className="empty-line">
-          Could not list repositories from GitHub. Check that the GitHub CLI is
-          installed and authenticated, then refresh.
-        </p>
+      ) : githubUnavailable ? (
+        <div className="github-degraded">
+          <strong>{degradedMessage.title}</strong>
+          <span>{degradedMessage.detail}</span>
+        </div>
       ) : (
         <>
           <div className="picker-controls">
@@ -366,7 +407,7 @@ export function GithubPickerSection() {
                           ref={(element) => {
                             rowActionRefs.current[entry.fullName] = element;
                           }}
-                          className="btn subtle"
+                          className="btn subtle refresh-action"
                           disabled={rowRefresh[entry.fullName] === "busy" || rowUntrack[entry.fullName]}
                           title="Refresh this tracked repository's metadata and recent commits"
                           onClick={() => void refreshTrackedRow(entry)}
