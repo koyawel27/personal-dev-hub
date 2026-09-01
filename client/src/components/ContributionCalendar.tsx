@@ -94,17 +94,20 @@ export function ContributionCalendar({
                 </div>
               ))}
             </div>
+            {/* Legend lives inside the grid block so Less→More sits with the
+                calendar's own left edge instead of floating at the far panel
+                edge when the grid is narrower than its container. */}
+            <div className="calendar-legend mono">
+              <em>Less</em>
+              <i className="cell l0" />
+              <i className="cell l1" />
+              <i className="cell l2" />
+              <i className="cell l3" />
+              <i className="cell l4" />
+              <em>More</em>
+            </div>
           </div>
         </div>
-      </div>
-      <div className="calendar-legend mono">
-        <em>Less</em>
-        <i className="cell l0" />
-        <i className="cell l1" />
-        <i className="cell l2" />
-        <i className="cell l3" />
-        <i className="cell l4" />
-        <em>More</em>
       </div>
     </div>
   );

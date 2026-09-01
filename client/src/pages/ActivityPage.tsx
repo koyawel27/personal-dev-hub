@@ -150,35 +150,44 @@ export function ActivityPage() {
           {error}
         </div>
       ) : null}
+      {/* Filter toolbar grouping mirrors the owner-approved interaction
+          model without explaining it: the Project selector applies
+          immediately, while From/To stay drafts until Filter commits them.
+          Project stands alone; the date controls + Filter read as one
+          explicit date-filter group. Purely visual. */}
       <form
-        className="form-row"
+        className="form-row activity-filter-row"
         onSubmit={(event) => {
           event.preventDefault();
           onFilterSubmit();
         }}
       >
-        <label className="form-field">
-          <span>Project</span>
-          <select value={draftProject} onChange={(event) => onProjectChange(event.target.value)}>
-            <option value="">All projects</option>
-            {projects.map((project) => (
-              <option key={project.id} value={String(project.id)}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="form-field">
-          <span>From</span>
-          <input type="date" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>To</span>
-          <input type="date" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} />
-        </label>
-        <button type="submit" className="primary">
-          Filter
-        </button>
+        <div className="filter-group">
+          <label className="form-field">
+            <span>Project</span>
+            <select value={draftProject} onChange={(event) => onProjectChange(event.target.value)}>
+              <option value="">All projects</option>
+              {projects.map((project) => (
+                <option key={project.id} value={String(project.id)}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="filter-group">
+          <label className="form-field">
+            <span>From</span>
+            <input type="date" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>To</span>
+            <input type="date" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} />
+          </label>
+          <button type="submit" className="primary">
+            Filter
+          </button>
+        </div>
       </form>
       {events.length === 0 && !error ? (
         <EmptyState
@@ -190,7 +199,7 @@ export function ActivityPage() {
           hint={<span>Adjust the filters, rescan a tracked project, or commit something in one.</span>}
         />
       ) : (
-        <section className="panel">
+        <section className="panel activity-feed-panel">
           <EventFeed events={events} />
           {hasMore ? (
             <div className="load-more-row">

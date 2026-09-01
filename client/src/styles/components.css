@@ -1163,7 +1163,8 @@ button.cell:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  align-self: flex-end;
+  align-self: flex-start;
+  margin-top: 8px;
   color: var(--text-muted);
 }
 
@@ -1204,6 +1205,7 @@ button.cell:hover:not(:disabled) {
 .stat {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 64px;
 }
 
@@ -1880,4 +1882,33 @@ button.cell:hover:not(:disabled) {
   padding-top: 8px;
   margin-bottom: 0;
   border-top: 1px solid var(--border);
+}
+
+/* ---------- Activity page micro-polish ----------
+   Filter toolbar: the Project selector applies immediately while From/To
+   stay drafts until Filter commits them. The two groups mirror that split
+   visually (Project stands alone; From/To + Filter read as one explicit
+   date-filter group) without changing any interaction. Controls bottom-
+   align with their inputs — the same alignment contract as the Sources
+   forms, which otherwise left the Filter button floating ~one label-height
+   above the input line. */
+.activity-filter-row {
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.activity-filter-row .filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* When column: one stable tabular-digit line instead of a timestamp that
+   wraps into multi-line cells at compact widths. Below 1200px the table
+   already scrolls internally by design, so the wider column reads as a
+   horizontal shift rather than crushing the timestamp. */
+.activity-feed-panel td:first-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
