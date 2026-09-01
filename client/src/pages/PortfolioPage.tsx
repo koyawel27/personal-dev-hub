@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import type { PortfolioItemDto } from "@shared/api-types";
 import { client } from "../api";
 import { notifyMutations } from "../lib/mutations";
-import { Badge, StatusBadge } from "../components/Badge";
+import { StatusBadge } from "../components/Badge";
+import { SourceBadge } from "../components/SourceBadge";
 import { EmptyState } from "../components/EmptyState";
 import { formatDateTime } from "../format";
 import { useApi } from "../useApi";
@@ -100,9 +101,13 @@ export function PortfolioPage() {
       ) : (
         <section className="panel">
           {projects.map((item, index) => {
-            const orderedCount = projects.filter((entry) => entry.portfolioOrder != null).length;
             return (
               <div className="portfolio-item" key={item.id}>
+                {/* Displayed position slot: the reorder arrows act on this
+                    visual order, so the position itself stays visible. */}
+                <span className="portfolio-pos" aria-hidden="true">
+                  {index + 1}
+                </span>
                 <div className="portfolio-main">
                   <Link className="list-link" to={`/projects/${item.id}`}>
                     {item.name}
@@ -112,10 +117,14 @@ export function PortfolioPage() {
                     {item.projectType ?? "No type"} ·{" "}
                     <StatusBadge status={item.projectStatus} />
                   </span>
-                  {item.projectNote ? <p>{item.projectNote}</p> : null}
-                  <div className="mono muted">
-                    {item.technologyHints.length > 0 ? item.technologyHints.join(" · ") : ""}
-                  </div>
+                  {item.projectNote ? (
+                    <p className="portfolio-note">{item.projectNote}</p>
+                  ) : null}
+                  {item.technologyHints.length > 0 ? (
+                    <div className="mono muted">
+                      {item.technologyHints.join(" · ")}
+                    </div>
+                  ) : null}
                   <div className="muted">
                     {item.firstCommitAt
                       ? `Active ${formatDateTime(item.firstCommitAt)} → ${formatDateTime(item.latestCommitAt)}`
@@ -123,11 +132,10 @@ export function PortfolioPage() {
                   </div>
                 </div>
                 <div className="portfolio-side">
-                  {item.githubHtmlUrl ? (
-                    <Badge tone="neutral">GitHub</Badge>
-                  ) : (
-                    <Badge tone="neutral">Local only</Badge>
-                  )}
+                  {/* Real derived source composition (LOCAL ONLY /
+                      LOCAL + GITHUB / GITHUB ONLY) instead of the previous
+                      githubHtmlUrl-only "GitHub"/"Local only" conflation. */}
+                  <SourceBadge state={item.sourceState} />
                   <div className="row-actions">
                     <button
                       type="button"
@@ -159,7 +167,7 @@ export function PortfolioPage() {
                       disabled={reorderBusyId != null}
                       onClick={() => void removeFromPortfolio(item)}
                     >
-                      Remove
+                      Remove from Portfolio
                     </button>
                   </div>
                 </div>
