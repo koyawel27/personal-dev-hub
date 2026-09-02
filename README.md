@@ -1,6 +1,6 @@
 # Personal Dev Hub
 
-A personal, local-first developer workspace for one machine. It combines your local Git repositories, optional GitHub enrichment, lightweight project tracking, recent development activity, contribution history, and selected portfolio work into one simple local web app.
+A personal, local-first developer workspace for one machine. It combines your local Git repositories, optional GitHub tracking, lightweight project tracking, recent development activity, contribution history, and selected portfolio work into one simple local web app.
 
 The central question it answers:
 
@@ -54,7 +54,7 @@ npm run build
 | GitHub tracking | Curated picker under Sources → Browse GitHub Repositories: search plus Owned/Collaborator/Organization/Public/Private/Archived/Forks/Tracked/Untracked filters; explicit selection only; picking a repository that matches a local clone's remote links them into one project instead of duplicating it; tracking never clones |
 | Project Detail | Source-aware logbook: local state (branch, working tree, changed files) when a local copy exists; GitHub identity, visibility, default branch, last push for linked repositories; bounded commit history tagged by source; per-project activity journal |
 | Activity | Global development journal built from fingerprinted events across both origins (commit observed, working-tree transitions, branch changes, GitHub repo tracked/untracked); unchanged rescans and no-op refreshes add nothing |
-| Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (duplicates collapsed by repository identity + SHA); counts are commits, never hours; not a full GitHub profile graph |
+| Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (a commit SHA present in both the local and GitHub tracked datasets is counted once, with the overlap reported transparently); counts are commits, never hours; not a full GitHub profile graph |
 | Portfolio | Selected-work view over projects: notes, type/status, technology hints (manifest probes, or GitHub's reported primary language for GitHub-only items), first/latest known commit dates, simple ordering. GitHub-only projects are eligible without a local clone |
 | Sources | Multiple scan roots with depth control, native folder browsing, manual add of individual repositories (each a local binding of a Project), and the GitHub repository picker. Project metadata lives on the Project itself (`PATCH /api/projects/:projectId/metadata`), never on a repository row |
 | Settings | Git executable status, GitHub connection summary (CLI installed / account connected via your existing `gh` login), default scan depth, app data location, rescan controls |
@@ -75,7 +75,7 @@ Everything persists in `data/dashboard.sqlite` inside the project folder (overri
 - Single user, single machine, desktop-first layout.
 - Ahead/behind is computed from remote-tracking refs already on disk — the app never fetches, so sync state is only as fresh as your own git usage.
 - GitHub-side commits are stored for tracked repositories after a manual refresh (bounded to the most recent ~100 per repository); the GitHub view of Contributions covers exactly that data.
-- Contributions shows the current month; it is not a replication of GitHub's full profile contribution graph.
+- Contributions is year-based, with available-year selection (years listed newest-first); it is not a replication of GitHub's full profile contribution graph.
 - A project has at most one GitHub binding in V1.1; multiple local copies per project are supported structurally (the first registered copy is treated as primary).
 - No notifications, background watching/sync daemon, OAuth, cloning, AI features, or team/corporate anything — by design.
 
@@ -94,7 +94,7 @@ git add README.md
 git commit -m "initial"
 ```
 
-Add that folder under **Sources → Individual Repositories**, then change it *outside* the hub:
+Add that folder under **Sources → Local Repositories**, then change it *outside* the hub:
 
 1. Clean — should show `Clean`
 2. Edit `README.md` — should show `Uncommitted` and a modified file

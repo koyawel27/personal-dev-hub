@@ -6,6 +6,8 @@
 > Product direction: personal developer workspace / lightweight project tracker  
 > Target: Windows-first, local-first, single-user V1
 
+**Document status:** V1.1 is complete and owner-accepted. This spec is retained as design/historical context and has been aligned to the accepted implementation (see `docs/RELEASE_V1.1.md`).
+
 ---
 
 ## 1. Product vision
@@ -46,7 +48,7 @@ A project must be useful even when it has:
 - no internet connection,
 - no cloud account.
 
-GitHub is optional enrichment, not a requirement.
+GitHub is an optional first-class binding, not a requirement. Local functionality must work fully without it.
 
 ### 2.3 Repository state supports the product; it is not the product
 
@@ -164,12 +166,13 @@ Projects is the main project tracker and repository explorer.
 
 ### 6.1 Project sources
 
-A project may be:
+The **Project** is the tracked domain entity. Its source state derives from its bindings:
 
-- **Local + GitHub**
-- **Local Only**
+- **LOCAL ONLY** — one or more local repository bindings, no GitHub binding.
+- **LOCAL + GITHUB** — local repository binding(s) plus a GitHub binding.
+- **GITHUB ONLY** — a GitHub binding with no local copy. GITHUB ONLY projects are fully valid in V1.1, including for Portfolio.
 
-GitHub-only projects are **not required for V1** and may be considered for V2.
+A Project with zero bindings is an invalid/transient state and exists only as a repair state (see migration `007_repair_zero_binding_ghosts`); it is never presented as GITHUB ONLY.
 
 ### 6.2 Project list
 
@@ -201,7 +204,7 @@ Support:
 
 ### 6.4 Manual project metadata
 
-Each tracked project may have lightweight user-managed metadata.
+Each Project carries lightweight user-managed metadata. Manual metadata belongs to the **Project entity itself** (`PATCH /api/projects/:projectId/metadata`) — never to a local repository row or a GitHub binding. Local Git state (branch, working tree, commits, remotes) belongs to local repository bindings; GitHub metadata (visibility, default branch, last push) belongs to the GitHub binding.
 
 **Status:** Active, Paused, Finished, Archived, Experiment.
 
@@ -270,7 +273,7 @@ Launcher APIs must use a registered project/repository ID and resolve the truste
 
 ## 8. Activity
 
-Activity is a global chronological development journal.
+Activity is a global chronological development journal. Activity ownership is **Project-centric**: every event belongs to a Project and is derived from that Project's local repository bindings and/or its GitHub binding. Raw source observations remain distinguishable behind the deduplicated view.
 
 ### 8.1 Local activity event types
 
@@ -297,6 +300,8 @@ Recommended V1 events:
 
 Rescanning an unchanged repository must not create duplicate activity events. Use stable fingerprints or deterministic transition detection.
 
+The logical Activity read model collapses matching commit observations by **Project + SHA**: the same commit observed both locally and on GitHub appears once (surfaced as LOCAL + GITHUB), while genuine non-commit events and commits with different SHAs remain distinct. Raw per-source observations remain preserved in storage and distinguishable.
+
 ---
 
 ## 9. Contributions
@@ -305,17 +310,15 @@ Contributions is a first-class V1 feature.
 
 ### 9.1 Contribution calendar
 
-Provide a GitHub-style year/activity heatmap or similar compact calendar visualization, but do not visually clone GitHub or LogBytes exactly.
+Contributions is **YEAR-based**: the page renders a full-year view with available-year selection (years listed newest-first), backed by a GitHub-style compact calendar visualization that does not visually clone GitHub or LogBytes exactly.
 
 ### 9.2 Activity sources
 
-V1 should support at least:
+The implementation provides three lenses, with the selected source always clear in the UI:
 
-- Local Git commit activity
-- GitHub commit/contribution enrichment when available
-- Combined view where technically reliable
-
-The UI should make the selected source clear.
+- **Local** — local Git commit activity,
+- **GitHub** — commits observed from tracked GitHub bindings after a manual refresh,
+- **Combined** — both, with overlapping commits collapsed.
 
 ### 9.3 Daily detail
 
@@ -328,7 +331,7 @@ Selecting a day should show useful detail such as:
 
 ### 9.4 Avoid double-counting
 
-If a local commit and GitHub enrichment refer to the same commit SHA, do not count it twice in combined activity.
+In the Combined view, the same commit SHA observed in both the local and GitHub tracked datasets is counted once, with the overlap reported transparently rather than hidden.
 
 ### 9.5 No exact time claims
 
@@ -355,9 +358,9 @@ Show projects marked `Include in Portfolio`. Each selected project may display:
 - development activity summary,
 - first / latest known commit dates.
 
-### 10.2 Local-only first
+### 10.2 Local-first, GitHub-only eligible
 
-V1 portfolio can remain a local preview inside the app. No public hosting or publishing service is required.
+The portfolio is a local preview inside the app. No public hosting or publishing service is required. Projects in any valid source state may be included — **LOCAL ONLY**, **LOCAL + GITHUB**, and **GITHUB ONLY** — with GitHub-only items using GitHub's reported primary language as the technology hint.
 
 ### 10.3 Explicitly out of scope
 
@@ -366,6 +369,12 @@ Do not build professional experience forms, public account identity, resume buil
 ---
 
 ## 11. Sources
+
+The Sources page is organized into three sections, matching the implemented UI:
+
+1. **Scan Locations** — multiple user-configured scan roots,
+2. **Local Repositories** — individual local repository bindings (including manual add),
+3. **Browse GitHub Repositories** — the curated GitHub picker.
 
 ### 11.1 Scan roots
 
@@ -443,7 +452,7 @@ Ahead/behind is computed from local remote-tracking refs already present. The ap
 
 ## 14. GitHub integration
 
-GitHub is optional enrichment. The app must fully work without GitHub authentication.
+GitHub is optional. The app must fully work without GitHub authentication, and local functionality never depends on it.
 
 ### 14.1 Remote recognition
 
@@ -453,114 +462,52 @@ Open GitHub should work from a recognized remote even when GitHub CLI enrichment
 
 ### 14.2 Authentication
 
-Prefer existing `gh` authentication if available. Do not store GitHub personal access tokens inside the application's own database.
+Prefer existing `gh` authentication if available. Do not store GitHub personal access tokens inside the application's own database. There is no OAuth flow and no PAT storage.
 
-### 14.3 Enrichment
+### 14.3 Tracking — an optional first-class binding
 
-When available, GitHub enrichment may provide repository metadata, default branch, visibility, pushed-at timestamps, and contribution information needed by the Contributions page.
+GitHub repository tracking is an optional **first-class binding of a Project**, not merely enrichment:
 
-GitHub outages or missing authentication must not break local functionality.
+- Repositories are selected explicitly through the curated picker (**Sources → Browse GitHub Repositories**) with search and Owned/Collaborator/Organization/Public/Private/Archived/Forks/Tracked/Untracked filters.
+- Tracking never clones; it records the binding and fetches metadata plus bounded commit history only.
+- A picked repository whose remote matches a local clone's remote links into the same Project instead of duplicating it.
+- Refresh is **manual** only — no daemon, no background sync.
+- V1.1 cardinality: at most **one GitHub binding per Project** (0..1), enforced by schema.
+- GitHub outages or missing authentication must not break local functionality.
 
 ---
 
-## 15. Data model direction
+## 15. Data model (V1.1, as implemented)
 
-The existing partial implementation may already contain some of these concepts. Reuse compatible work rather than rewriting blindly.
+The V1.1 model is Project-centric, established by migrations `004_projects_core`, `005_github_bindings`, and `006_project_activity`, with `007_repair_zero_binding_ghosts` as a repair migration.
 
-### 15.1 `project_sources`
+### 15.1 `projects` — the core entity
 
-- id
-- path
-- canonical_path
-- scan_depth
-- enabled
-- created_at
-- last_scanned_at
+Owns all manual metadata: project status, type, note, include-in-portfolio flag, and portfolio order. Manual metadata never lives on repository rows.
 
-### 15.2 `local_repositories`
+### 15.2 `local_repositories` — local bindings of a Project
 
-- id
-- source_id nullable
-- name
-- local_path
-- canonical_path unique
-- discovery_type
-- project_status
-- project_type
-- project_note
-- include_in_portfolio
-- portfolio_order nullable
-- created_at
-- last_scanned_at
+Each row carries `project_id` referencing `projects`. There is deliberately **no uniqueness constraint** on `project_id`: the model structurally supports **0..many local bindings per Project** (V1.1 UX treats the first registered copy as primary for single-path displays). Local Git state belongs to these bindings and their satellite tables (`repository_snapshots`, `git_remotes`, `commits` — the latter unique per `(local_repository_id, commit_sha)` with bounded history).
 
-### 15.3 `repository_snapshots`
+### 15.3 `github_repositories` — the optional GitHub binding
 
-- id
-- local_repository_id
-- branch
-- head_commit_sha
-- is_dirty
-- modified_count
-- staged_count
-- untracked_count
-- upstream_ref
-- ahead_count
-- behind_count
-- captured_at
+`project_id` references `projects` under a **partial unique index** (`WHERE project_id IS NOT NULL`), enforcing **0..1 GitHub binding per Project** in V1.1. Untracked cache rows keep `project_id IS NULL`.
 
-### 15.4 `git_remotes`
+### 15.4 `github_commits` — GitHub-observed commits for tracked bindings
 
-- id
-- local_repository_id
-- name
-- url
-- host
-- owner
-- repository_name
-- github_repository_id nullable
-- is_primary
-- last_seen_at
+`UNIQUE (github_repository_id, commit_sha)`, bounded history, day-indexed for the Contributions year view.
 
-### 15.5 `github_repositories`
+### 15.5 `activity_events` — Project-centric
 
-- id
-- owner
-- name
-- full_name
-- visibility
-- default_branch
-- html_url
-- last_pushed_at
-- last_refreshed_at
+Rebuilt by migration `006` around `project_id`; events derive from a Project's local bindings and/or GitHub binding, with stable fingerprints preventing rescan noise and raw per-source observations remaining distinguishable.
 
-### 15.6 `commits`
+### 15.6 Zero-binding repair
 
-- id
-- local_repository_id
-- commit_sha
-- subject
-- author_name
-- committed_at
-- first_seen_at
+Migration `007_repair_zero_binding_ghosts` repairs zero-source Projects. A zero-binding Project is an invalid/transient repair state and is never treated as GITHUB ONLY.
 
-Unique: `(local_repository_id, commit_sha)`.
+### 15.7 Contribution data
 
-Commit history should be bounded.
-
-### 15.7 `activity_events`
-
-- id
-- local_repository_id
-- event_type
-- summary
-- occurred_at
-- source
-- fingerprint
-- metadata_json
-
-### 15.8 Contribution data
-
-Prefer deriving contribution views from commits/activity where practical. If GitHub enrichment requires cached contribution-day aggregates, add a dedicated cache table only when justified.
+Contribution views derive from local `commits` and `github_commits`. The Combined view collapses overlapping SHAs across the local and GitHub tracked datasets and reports deduplication transparently; aggregation is year-based with available-year selection.
 
 ---
 
@@ -611,27 +558,17 @@ Avoid introducing Redux, Next.js, Electron, Tauri, Docker, or a large framework 
 
 ---
 
-## 18. Visual direction
+## 18. Visual direction (owner-accepted V1.1)
 
-The visual design should **not copy LogBytes**.
+The accepted direction is a **"Warm Developer Workbench with subtle retro-computing character"**:
 
-Desired qualities:
+- warm paper/sand surfaces (`--bg`/`--surface` family) with a restrained clay accent,
+- faint grid/pixel texture, tactile borders, and restrained offset shadows,
+- Segoe UI / system sans for normal UI; Cascadia Mono / Consolas for technical metadata,
+- information-dense without clutter, strong project/activity hierarchy, clear state badges,
+- not terminal cosplay, not a generic SaaS look, not a GitHub clone, and not an 8-bit game UI.
 
-- personal developer-tool feel,
-- calm and focused,
-- compact but readable,
-- information-dense without clutter,
-- strong project/activity hierarchy,
-- clear state badges,
-- excellent dark mode or a carefully chosen primary theme,
-- responsive desktop-first layout,
-- subtle use of cards/panels where they clarify structure,
-- no giant marketing UI,
-- no glassmorphism-heavy design,
-- no decorative gradients unless restrained,
-- no fake terminal aesthetic everywhere.
-
-The app should feel like a useful personal workspace, not a SaaS landing page or enterprise analytics product.
+**Desktop-first:** narrow widths are a containment requirement only (internal scrolling is acceptable); first-class mobile polish is deliberately deferred.
 
 ---
 
@@ -781,7 +718,7 @@ Manual rescan is sufficient for V1.
 - User can select projects for portfolio.
 - Portfolio view reuses tracked project data.
 - GitHub URL works when available.
-- Local-only projects can still appear.
+- LOCAL ONLY, LOCAL + GITHUB, and GITHUB ONLY projects can all appear.
 - Empty state works.
 - No public hosting is required.
 
@@ -822,70 +759,50 @@ Use disposable Git repository fixtures where appropriate.
 
 ---
 
-## 23. Continuation context for the existing Grok implementation
+## 23. Historical context: the pre-V1.1 Grok checkpoint (historical)
 
-This repository already contains a **partial implementation produced by Grok Build**.
+> **This section is historical.** V1.1 is complete and owner-accepted; nothing here describes pending work.
 
-The original Grok-only endpoint is preserved in Git history at:
+This repository's earliest working state was a **partial implementation produced by a Grok build run**. That checkpoint is preserved in Git history at:
 
-- commit: `9711ebb`
+- commit: `20fe6ff`
 - checkpoint message: `checkpoint: preserve partial Grok implementation after free limit`
 
-Treat that checkpoint as historical evidence and do not rewrite history.
+> **Note on SHAs:** the repository history was intentionally rewritten before its first GitHub publication to replace a private email address with the owner's GitHub noreply identity. Older documents that reference SHA `9711ebb` for this checkpoint are stale; `20fe6ff` is the corresponding commit in the current history. Do not resurrect old SHAs.
 
-The partial implementation includes backend/shared infrastructure such as SQLite setup/migrations, Git process execution, Git parsers, Git service, activity service, and shared path/GitHub/status utilities.
+The partial implementation included backend/shared infrastructure such as SQLite setup/migrations, Git process execution, Git parsers, a Git service, an activity service, and shared path/GitHub/status utilities.
 
-The previous run did **not** complete the app. Known state at the checkpoint included:
-
-- no completed frontend,
-- no test suite,
-- build could not run because the client was absent,
-- TypeScript config required correction,
-- implementation had progressed beyond clean milestone boundaries.
+Known state at that checkpoint: no completed frontend, no test suite, a build that could not run because the client was absent, and a TypeScript config requiring correction. All of that has since been superseded by the completed V1.1 implementation.
 
 ---
 
-## 24. Required continuation workflow for the next coding agent
+## 24. Continuation outcome (historical)
 
-Before modifying code:
+> **This section is historical.** The continuation workflow that was previously addressed to a "next coding agent" was executed to completion and required no further continuation.
 
-1. Read this revised `PROJECT_SPEC.md` completely.
-2. Inspect the full repository and Git history.
-3. Inspect the existing partial Grok implementation.
-4. Determine which existing code is reusable as-is, reusable with fixes, obsolete under the revised direction, or missing.
-5. Do **not** restart the project from scratch unless the audit proves a component is unsalvageable.
-6. Produce a continuation plan before implementation.
-7. Map every proposed milestone to this revised specification.
-8. Identify migrations required from the old data model/code to the revised product model.
-9. Preserve the read-only Git safety model.
-10. Wait for explicit approval before implementation.
-
-The continuation agent should be judged partly on its ability to inherit and improve another agent's unfinished work rather than simply replacing it.
+The continuation proceeded through audit, an approved plan, and implementation milestones that produced the V1.1 product: the Project-centric data model (migrations 004–006 with 007 as repair), retirement of the repository-as-project compatibility APIs, first-class GitHub tracking with GITHUB ONLY projects, Project-centric activity with honest commit dedup, year-based Contributions with Local/GitHub/Combined lenses, the warm developer workbench UI, and the full deterministic test suite. The result was accepted by the owner and is recorded in `docs/RELEASE_V1.1.md`.
 
 ---
 
-## 25. Definition of done
+## 25. Definition of done — V1.1 (met)
 
-V1 is done only when:
+V1.1 is done, and was accepted by the owner, against the following criteria:
 
-1. The app discovers and tracks multiple real local Git repositories.
-2. Dashboard accurately reflects current/recent personal development activity.
-3. Projects can be lightly categorized and annotated.
-4. Project Detail accurately exposes Git state and recent history without mutating repos.
-5. Global Activity works without duplicate scan noise.
-6. Contributions visualize real development activity and avoid obvious double-counting.
-7. GitHub enrichment is useful but optional.
-8. Portfolio presents selected projects using existing tracked data.
-9. Sources and manual repository management are safe and understandable.
-10. Launcher actions are constrained to registered repositories.
-11. Local repository files are never mutated by the application.
-12. Tests cover critical parsing, activity, contributions, validation, and safety behavior.
-13. Production build passes.
-14. Type checking passes.
-15. Test suite passes.
-16. Live manual acceptance confirms the main workflows.
-17. README documents installation, startup, data location, limitations, and privacy behavior.
-18. Git working tree is clean at the final accepted checkpoint.
+1. The **Project** is the tracked domain entity, with optional local repository bindings (0..many structurally; V1.1 UX treats the first registered copy as primary) and an optional GitHub binding (0..1).
+2. All three source states are valid and implemented: LOCAL ONLY, LOCAL + GITHUB, GITHUB ONLY. A zero-source Project is an invalid/transient repair state, never GITHUB ONLY.
+3. GitHub tracking is a first-class optional binding: curated picker, explicit selection, never clones, manual refresh only, no daemon/background sync, no OAuth or PAT storage; local functionality works fully without GitHub.
+4. Manual metadata belongs to the Project; local Git state belongs to local bindings; GitHub metadata belongs to the GitHub binding. Retired repository-as-project APIs are gone (one Project abstraction).
+5. Dashboard accurately reflects current/recent development activity derived from meaningful events.
+6. Activity is Project-centric with honest dedup (Project + SHA); raw source observations remain preserved in storage and distinguishable; unchanged rescans add nothing.
+7. Contributions are year-based with available-year selection, offering Local / GitHub / Combined lenses; Combined collapses overlapping commits transparently; counts are commits, never hours.
+8. Portfolio presents selected projects — including GITHUB ONLY projects — using existing tracked data.
+9. Sources are organized as Scan Locations / Local Repositories / Browse GitHub Repositories, and repository management is safe and understandable.
+10. Launcher actions are constrained to registered ids; no arbitrary path or command execution exists.
+11. Local repository files are never mutated by the application; the read-only Git safety model holds.
+12. Tests cover critical parsing, migration, activity, contributions, validation, and safety behavior: **37 test files / 211 tests passed**; typecheck passed; production build passed.
+13. Owner live acceptance passed: Dashboard, Projects, Project Detail, Activity, Contributions, Portfolio, Sources, Settings, and a console sanity check.
+14. README documents installation, startup, data location, limitations, and privacy behavior; the release record exists at `docs/RELEASE_V1.1.md`.
+15. Git working tree is clean at the accepted checkpoint (`330c182ebdf528a503568b16bc3831cec8e85589`, tree `5ea1769871afceb4b1518f86dd18ef1f92fe9366`, tag `personal-dev-hub-v1.1-owner-accepted`).
 
 ---
 
