@@ -257,10 +257,28 @@ export type SnapshotDto = {
   capturedAt: string;
 };
 
+/**
+ * V1.2 M1: response for POST /api/repositories/:id/primary. The switch is a
+ * pure display-preference flip; the payload carries only enough state for
+ * UI/cache reconciliation. The fingerprint anchor is an INTERNAL persistence
+ * identity (owner decision D1) and is deliberately NOT exposed to clients.
+ */
+export type SetPrimaryLocalBindingResponse = {
+  ok: true;
+  projectId: number;
+  primaryRepositoryId: number;
+};
+
 export type RepositoryListItem = {
   id: number;
   /** Owning project id (V1.1: metadata lives on the Project). */
   projectId: number | null;
+  /**
+   * V1.2 M1: server-authoritative display primary. Exactly one local
+   * binding per project carries this; clients must consume it instead of
+   * re-deriving a primary by name or row order.
+   */
+  isPrimary: boolean;
   name: string;
   localPath: string;
   canonicalPath: string;

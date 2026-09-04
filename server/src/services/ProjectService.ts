@@ -1,5 +1,6 @@
 import type {
   GitHubMetadataDto,
+  SetPrimaryLocalBindingResponse,
   ProjectStatus,
   ProjectType,
   SnapshotDto,
@@ -62,6 +63,83 @@ export function getProjectRow(id: number): ProjectRow {
   return row;
 }
 
+/**
+ * V1.2 M1 — repair the display primary after any local-binding write:
+ * exactly one is_primary=1 per project with local bindings, anchored on
+ * MIN(id) when no explicit primary survives. Defensive backstop for the
+ * transactional paths above; a no-op when the invariant already holds.
+ * Called inside the caller's transaction.
+ */
+export function ensureSinglePrimary(projectId: number): void {
+  const db = getDb();
+  const primary = db
+    .prepare(
+      `SELECT id FROM local_repositories
+       WHERE project_id = ? AND is_primary = 1
+       ORDER BY id ASC LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  if (primary != null) return;
+  const anchor = db
+    .prepare(
+      `SELECT id FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  if (anchor == null) return;
+  db.prepare("UPDATE local_repositories SET is_primary = 1 WHERE id = ?").run(anchor.id);
+}
+
+/**
+ * V1.2 M1 — display-primary switch (POST /api/repositories/:id/primary).
+ * Pure preference flip inside one transaction: unset the project's current
+ * primary, set the selected binding. NO Git call, NO filesystem access, and
+ * NO activity event (a UI/source preference is not development activity).
+ * Returns only enough state for UI/cache reconciliation; the fingerprint
+ * anchor (MIN(id), owner decision D1) is internal persistence identity and
+ * is deliberately NOT part of the API surface.
+ */
+export function setPrimaryLocalBinding(id: number): SetPrimaryLocalBindingResponse {
+  return withTransaction(() => {
+    const db = getDb();
+    const binding = db
+      .prepare(
+        `SELECT id, project_id FROM local_repositories WHERE id = ?`,
+      )
+      .get(id) as { id: number; project_id: number | null } | undefined;
+    if (binding == null) {
+      throw new AppError(ErrorCodes.REPOSITORY_NOT_FOUND, "Repository was not found.", 404);
+    }
+    if (binding.project_id == null) {
+      throw new AppError(
+        ErrorCodes.INVALID_REQUEST,
+        "That local repository does not belong to a Project.",
+        400,
+      );
+    }
+    const alreadyPrimary =
+      (
+        db
+          .prepare(
+            "SELECT is_primary FROM local_repositories WHERE id = ?",
+          )
+          .get(id) as { is_primary: number }
+      ).is_primary === 1;
+    if (!alreadyPrimary) {
+      db.prepare(
+        "UPDATE local_repositories SET is_primary = 0 WHERE project_id = ? AND is_primary = 1",
+      ).run(binding.project_id);
+      db.prepare(
+        "UPDATE local_repositories SET is_primary = 1 WHERE id = ?",
+      ).run(id);
+    }
+    return {
+      ok: true,
+      projectId: binding.project_id,
+      primaryRepositoryId: id,
+    };
+  });
+}
+
 export function githubBindingForProject(projectId: number): GhBindingRow | null {
   return (
     (getDb()
@@ -98,8 +176,39 @@ function lastMeaningfulAt(projectId: number): string | null {
   return row.at ?? null;
 }
 
-/** Primary local copy = lowest binding id (V1.1 presentation rule). */
+/**
+ * V1.2 M1 server-authoritative DISPLAY-PRIMARY resolver.
+ *
+ * 1. explicit is_primary=1 binding (the user-selected primary);
+ * 2. defensive fallback to MIN(id) — repairs legacy/hand-mangled rows that
+ *    lack an explicit primary so user-visible state never disappears.
+ *
+ * This is the ONLY concept the UI sees. It is deliberately distinct from
+ * the fingerprint anchor below (owner decision D1): switching the display
+ * primary must never re-key historical activity.
+ */
 export function primaryLocalBindingId(projectId: number): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM local_repositories
+       WHERE project_id = ?
+       ORDER BY is_primary DESC, id ASC
+       LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+/**
+ * V1.2 M1 FINGERPRINT ANCHOR (owner decision D1, LOCKED).
+ *
+ * Deterministic MIN(local_repository.id) per project — permanently stable
+ * and completely INDEPENDENT of the display primary. All project-scoped
+ * activity fingerprints resolve their scope segment through this helper;
+ * changing which binding the user displays as primary must never produce
+ * a different fingerprint for the same logical event.
+ */
+export function fingerprintAnchorLocalBindingId(projectId: number): number | null {
   const row = getDb()
     .prepare(
       "SELECT MIN(id) AS id FROM local_repositories WHERE project_id = ?",
@@ -193,11 +302,16 @@ export function listProjects(filter?: { state?: string; query?: string }): Proje
   const items: ProjectListItemDto[] = rows.map((row) => {
     const state = deriveSourceState(row.id);
     const gh = githubBindingForProject(row.id);
+    // V1.2 M1: server-authoritative display primary (explicit is_primary,
+    // MIN(id) fallback) — never a name- or id-ordered guess.
     const primaryLocal =
       (
         getDb()
           .prepare(
-            "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
+            `SELECT local_path FROM local_repositories
+             WHERE project_id = ?
+             ORDER BY is_primary DESC, id ASC
+             LIMIT 1`,
           )
           .get(row.id) as { local_path: string } | undefined
       )?.local_path ?? null;
@@ -322,7 +436,12 @@ export async function getProjectDetail(id: number): Promise<{
         (
           db
             .prepare(
-              "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
+              // V1.2 M1: display primary first (explicit is_primary, MIN(id)
+              // fallback) — never a bare id-order guess.
+              `SELECT local_path FROM local_repositories
+               WHERE project_id = ?
+               ORDER BY is_primary DESC, id ASC
+               LIMIT 1`,
             )
             .get(row.id) as { local_path: string } | undefined
         )?.local_path ?? null,
@@ -666,11 +785,13 @@ function deleteProjectCascade(projectId: number): void {
 
 /**
  * Project-scoped fingerprint. The second segment mirrors the legacy
- * repo-id namespace: the primary local binding when one exists (so
- * pre-V1.1 style identities stay stable), else the project itself.
+ * repo-id namespace: the FINGERPRINT ANCHOR binding (deterministic
+ * MIN(id), owner decision D1) when one exists — never the mutable
+ * display primary, so switching the primary cannot re-key history —
+ * else the project itself.
  */
 function projectScopedFingerprint(projectId: number, rest: string): string {
-  const scope = primaryLocalBindingId(projectId) ?? projectId;
+  const scope = fingerprintAnchorLocalBindingId(projectId) ?? projectId;
   return `p${projectId}:${scope}:${rest}`;
 }
 

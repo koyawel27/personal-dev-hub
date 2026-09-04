@@ -38,6 +38,7 @@ import {
   type PreviousSnapshot,
 } from "./ActivityService.js";
 import {
+  ensureSinglePrimary,
   finalizeProjectAfterFinalBindingRemoval,
 } from "./ProjectService.js";
 import { fetchGitHubRepoMetadata } from "./GitHubService.js";
@@ -53,6 +54,8 @@ type RepoRow = {
   id: number;
   source_id: number | null;
   project_id: number | null;
+  /** V1.2 M1: explicit display-primary flag (server-authoritative). */
+  is_primary: number;
   name: string;
   local_path: string;
   canonical_path: string;
@@ -182,6 +185,13 @@ function toListItem(
     snap: SnapshotRow | null;
     activity: { at: string; summary: string } | null;
     githubUrl: string | null;
+    /**
+     * V1.2 M1: the server-resolved EFFECTIVE primary for the owning
+     * project (explicit is_primary = 1, else the deterministic MIN(id)
+     * fallback for zero-primary repair states). Clients consume the
+     * resulting boolean; they never derive a primary themselves.
+     */
+    effectivePrimaryId: number | null;
     project?: {
       project_status: ProjectStatus | null;
       project_type: ProjectType | null;
@@ -206,6 +216,11 @@ function toListItem(
   return {
     id: row.id,
     projectId: row.project_id,
+    // V1.2 M1: server-authoritative EFFECTIVE display primary — the
+    // explicit flag when present, else the deterministic MIN(id) fallback
+    // (owner decision D1 read rule). Clients must use this instead of
+    // first-row/name-order heuristics.
+    isPrimary: ctx.effectivePrimaryId === row.id,
     name: row.name,
     localPath: row.local_path,
     canonicalPath: row.canonical_path,
@@ -234,7 +249,7 @@ function toListItem(
 function getRepoRow(id: number): RepoRow {
   const row = getDb()
     .prepare(
-      `SELECT id, source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
+      `SELECT id, source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
        FROM local_repositories WHERE id = ?`,
     )
     .get(id) as RepoRow | undefined;
@@ -252,7 +267,7 @@ function findRepoByIdentity(identity: string): RepoRow | null {
   return (
     (getDb()
       .prepare(
-        `SELECT id, source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
+        `SELECT id, source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
          FROM local_repositories WHERE canonical_path = ?`,
       )
       .get(identity) as RepoRow | undefined) ?? null
@@ -494,11 +509,20 @@ function upsertDiscoveredRepo(
   const result = db
     .prepare(
       `INSERT INTO local_repositories
-        (source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+        (source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at)
+       VALUES (?, ?,
+         -- V1.2 M1 new-binding invariant: the first local binding of a
+         -- project is explicitly its display primary (no DEFAULT-0 +
+         -- read-fallback reliance for newly created projects). Subquery
+         -- covers the pre-existing-bindings case; 1 for a brand-new project.
+         CASE WHEN EXISTS (
+           SELECT 1 FROM local_repositories lr2 WHERE lr2.project_id = ?
+         ) THEN 0 ELSE 1 END,
+         ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       sourceId,
+      projectId,
       projectId,
       name,
       readablePath,
@@ -565,34 +589,82 @@ function reconcileTrackedIdentity(repoId: number, canonicalPath: string): void {
     }
 
     withTransaction(() => {
-      db.prepare("UPDATE local_repositories SET project_id = ? WHERE id = ?").run(
-        tracked.project_id,
-        repoId,
-      );
+      // V1.2 M1: move the incoming binding with is_primary=0 unconditionally
+      // — idx_local_repo_project_primary enforces at most one is_primary=1
+      // per project, and the incoming binding (always the highest id) must
+      // NEVER override the target's chosen primary, including the
+      // deterministic MIN(id) fallback in a zero-explicit-primary repair
+      // state. ensureSinglePrimary below settles ownership.
+      db.prepare(
+        "UPDATE local_repositories SET project_id = ?, is_primary = 0 WHERE id = ?",
+      ).run(tracked.project_id, repoId);
       db.prepare("UPDATE activity_events SET project_id = ? WHERE project_id = ?").run(
         tracked.project_id,
         currentProjectId,
       );
       db.prepare("DELETE FROM projects WHERE id = ?").run(currentProjectId);
+      // Primary ownership settles here, still inside the merge transaction:
+      // an explicit primary stays untouched; a target with locals but zero
+      // explicit primary repairs to MIN(id); a GitHub-only target makes the
+      // incoming binding its first primary (new-binding invariant).
+      ensureSinglePrimary(tracked.project_id);
     });
     return;
   }
 }
 
+/**
+ * V1.2 M1: effective-primary resolver for one row's owning project —
+ * explicit is_primary = 1 first, else the deterministic MIN(id) fallback
+ * (zero-primary repair states never surface as primary-less). Mirrors the
+ * semantics of primaryLocalBindingId in ProjectService (owner decision D1
+ * read rule) without introducing a service import cycle.
+ */
+function effectivePrimaryIdFor(row: RepoRow): number | null {
+  if (row.project_id == null) return null;
+  const found = getDb()
+    .prepare(
+      `SELECT id FROM local_repositories
+       WHERE project_id = ?
+       ORDER BY is_primary DESC, id ASC
+       LIMIT 1`,
+    )
+    .get(row.project_id) as { id: number } | undefined;
+  return found?.id ?? null;
+}
+
 export function listRepositories(): RepositoryListItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT id, source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
+      `SELECT id, source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
        FROM local_repositories
        ORDER BY name COLLATE NOCASE ASC, id ASC`,
     )
     .all() as RepoRow[];
+  // Batch effective-primary resolution from the already-fetched rows:
+  // explicit flag wins (lowest id in degenerate states), else MIN(id) per
+  // project — identical ordering semantics to effectivePrimaryIdFor.
+  const explicit = new Map<number, number>();
+  const lowest = new Map<number, number>();
+  for (const row of rows) {
+    if (row.project_id == null) continue;
+    const currentExplicit = explicit.get(row.project_id);
+    if (row.is_primary === 1 && (currentExplicit == null || row.id < currentExplicit)) {
+      explicit.set(row.project_id, row.id);
+    }
+    const currentLowest = lowest.get(row.project_id);
+    if (currentLowest == null || row.id < currentLowest) {
+      lowest.set(row.project_id, row.id);
+    }
+  }
+  const effectivePrimary = (projectId: number): number | null =>
+    explicit.get(projectId) ?? lowest.get(projectId) ?? null;
   const context = buildListItemContext(rows.map((row) => row.id));
   return rows.map((row) =>
-    toListItem(
-      row,
-      context.get(row.id) ?? { snap: null, activity: null, githubUrl: null, project: null },
-    ),
+    toListItem(row, {
+      ...(context.get(row.id) ?? { snap: null, activity: null, githubUrl: null, project: null }),
+      effectivePrimaryId: effectivePrimary(row.project_id as number),
+    }),
   );
 }
 
@@ -829,10 +901,10 @@ function githubMetadataForRepo(repoId: number): GitHubMetadataDto | null {
 export async function getRepositoryDetail(id: number): Promise<RepositoryDetail> {
   const row = getRepoRow(id);
   const context = buildListItemContext([row.id]);
-  const item = toListItem(
-    row,
-    context.get(row.id) ?? { snap: null, activity: null, githubUrl: null, project: null },
-  );
+  const item = toListItem(row, {
+    ...(context.get(row.id) ?? { snap: null, activity: null, githubUrl: null, project: null }),
+    effectivePrimaryId: effectivePrimaryIdFor(row),
+  });
   let changedFiles: RepositoryDetail["changedFiles"] = [];
   try {
     const inspection = await inspectRepository(item.localPath);
@@ -895,7 +967,29 @@ export function deleteRepository(
     return { ok: true, projectDeleted: false };
   }
   return withTransaction(() => {
+    const wasPrimary = repo.is_primary === 1;
     getDb().prepare("DELETE FROM local_repositories WHERE id = ?").run(id);
+    // V1.2 M1: if the removed binding was the display primary and another
+    // local binding remains, promote MIN(id) of the survivors to is_primary=1
+    // BEFORE the transaction completes (owner decision D2). If it was not
+    // primary, the explicit primary remains untouched. The defensive
+    // repair at the end covers any manual/partial state.
+    if (wasPrimary) {
+      // Owner decision D2: promote the lowest surviving binding id to
+      // display primary IN THE SAME TRANSACTION; MIN(id) reproduces the
+      // V1.1 effective-primary rule byte-for-byte.
+      getDb()
+        .prepare(
+          `UPDATE local_repositories SET is_primary = CASE WHEN id = (
+             SELECT MIN(id) FROM local_repositories WHERE project_id = ?
+           ) THEN 1 ELSE 0 END
+           WHERE project_id = ?`,
+        )
+        .run(projectId, projectId);
+    }
+    // Defensive backstop (no-op when exactly one explicit primary already
+    // exists): covers manual/partial states and pre-008 rows.
+    ensureSinglePrimary(projectId);
     // Binding-level snapshots/commits/remotes cascade with the FK; events
     // survive as project-scoped rows and count toward meaningfulness below.
     return {
@@ -994,7 +1088,7 @@ export function getDashboard(): DashboardResponse {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT id, source_id, project_id, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
+      `SELECT id, source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at, project_status, project_type, project_note, include_in_portfolio, portfolio_order
        FROM local_repositories
        ORDER BY name COLLATE NOCASE ASC, id ASC`,
     )

@@ -65,13 +65,16 @@ export function ProjectsPage() {
       .finally(() => setLoaded(true));
   }, []);
 
-  // Local snapshot lookup by project (primary binding = first repo row).
+  // Local snapshot lookup by project. V1.2 M1: consume ONLY the
+  // server-authoritative effective primary (explicit is_primary=1, else the
+  // server's MIN(id) defensive fallback). No client-side row-order or name
+  // fallback — a project with local bindings always has exactly one
+  // isPrimary row per the server contract.
   const repoByProject = useMemo(() => {
     const map = new Map<number, RepositoryListItem>();
     for (const repo of repos) {
-      if (repo.projectId != null && !map.has(repo.projectId)) {
-        map.set(repo.projectId, repo);
-      }
+      if (repo.projectId == null || !repo.isPrimary) continue;
+      map.set(repo.projectId, repo);
     }
     return map;
   }, [repos]);

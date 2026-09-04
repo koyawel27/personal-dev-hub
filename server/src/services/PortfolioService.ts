@@ -63,7 +63,8 @@ export function listPortfolio(): PortfolioItemDto[] {
               g.html_url AS gh_html_url,
               g.language AS gh_language,
               (SELECT lr.local_path FROM local_repositories lr
-                WHERE lr.project_id = p.id ORDER BY lr.id ASC LIMIT 1) AS primary_local_path
+                WHERE lr.project_id = p.id
+                ORDER BY lr.is_primary DESC, lr.id ASC LIMIT 1) AS primary_local_path
        FROM projects p
        LEFT JOIN github_repositories g ON g.project_id = p.id
        WHERE p.include_in_portfolio = 1

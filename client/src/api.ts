@@ -13,6 +13,7 @@ import type {
   ProjectListItemDto,
   RepositoryDetail,
   RepositoryListItem,
+  SetPrimaryLocalBindingResponse,
   ScanSummary,
   SourceDto,
   PickerEntryDto,
@@ -86,6 +87,12 @@ export const client = {
     api<DeleteLocalBindingResponse>(
       `/api/repositories/${localRepositoryId}${confirmDeleteProject ? "?confirmDeleteProject=true" : ""}`,
       { method: "DELETE" },
+    ),
+  // V1.2 M1: display-primary switch (pure preference flip; no activity event).
+  setLocalPrimary: (localRepositoryId: number) =>
+    api<SetPrimaryLocalBindingResponse>(
+      `/api/repositories/${localRepositoryId}/primary`,
+      { method: "POST" },
     ),
   open: (
     localRepositoryId: number,

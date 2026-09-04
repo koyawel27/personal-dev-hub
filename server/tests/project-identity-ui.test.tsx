@@ -60,6 +60,7 @@ function repo(partial: Partial<RepositoryListItem>): RepositoryListItem {
   return {
     id: 4,
     projectId: 17,
+    isPrimary: false,
     name: "local-dev-dashboard",
     localPath: "C:\\xampp-projects\\local-dev-dashboard",
     canonicalPath: "c:\\xampp-projects\\local-dev-dashboard",

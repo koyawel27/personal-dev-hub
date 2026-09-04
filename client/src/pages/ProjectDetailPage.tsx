@@ -39,9 +39,14 @@ export function ProjectDetailPage() {
     // binding (if any) and this project's tracked GitHub binding id, which
     // the picker payload exposes directly for tracked rows.
     const repos = await client.repositories();
-    const binding = repos.repositories.find(
-      (repo) => repo.projectId === id && repo.id != null,
-    );
+    // V1.2 M1: consume ONLY the server-authoritative effective primary
+    // (explicit is_primary=1, else the server's MIN(id) defensive fallback).
+    // Clients never derive a primary from row order or repository name, so
+    // there is deliberately NO first-row fallback here.
+    const binding =
+      repos.repositories.find(
+        (repo) => repo.projectId === id && repo.isPrimary,
+      ) ?? null;
     setBindingRepoId(binding?.id ?? null);
     if (detail.project.githubMetadata != null && detail.project.githubFullName != null) {
       const picker = await client.githubPicker();
@@ -256,6 +261,7 @@ export function ProjectDetailPage() {
               id: project.id,
               name: project.name,
               projectId: project.id,
+              isPrimary: false,
               localPath: project.localPath ?? "",
               canonicalPath: project.localPath ?? "",
               discoveryType: "manual",

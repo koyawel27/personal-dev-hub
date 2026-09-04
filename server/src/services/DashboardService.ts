@@ -48,7 +48,9 @@ export function getDashboard(): DashboardResponse {
      FROM local_repositories lr
      LEFT JOIN repository_snapshots s ON s.local_repository_id = lr.id
      WHERE lr.project_id = ?
-     ORDER BY lr.id ASC LIMIT 1`,
+     -- V1.2 M1: display primary first (explicit is_primary, MIN(id)
+     -- fallback); latest snapshot breaks ties deterministically.
+     ORDER BY lr.is_primary DESC, lr.id ASC, s.id DESC LIMIT 1`,
   );
 
   const ghBinding = db.prepare(

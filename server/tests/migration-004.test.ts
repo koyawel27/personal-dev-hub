@@ -14,7 +14,8 @@ import { createLegacyDb } from "./helpers.js";
  * Contract under test:
  * - deterministic 1:1 backfill from local_repositories
  * - project-owned metadata migrates byte-for-byte without loss
- * - every local binding gains a project_id; no uniqueness constraint on it
+ * - every local binding gains a project_id; no UNCONDITIONAL uniqueness
+ *   constraint on it (V1.2 M1 later adds a partial is_primary-only index)
  * - snapshots / remotes / commits are untouched
  * - post-conditions gate the commit (row counts, mapping completeness, FK)
  */
@@ -103,23 +104,25 @@ describe("migration 004_projects_core", () => {
     // Mapping must be order-preserving: first repo -> first project.
     expect(bindings[0].project_id).toBeLessThan(bindings[1].project_id);
 
-    // No UNIQUE index may exist on local_repositories.project_id (multiple
-    // local copies per project must remain structurally possible).
+    // No UNIQUE index may constrain local_repositories.project_id
+    // UNCONDITIONALLY (multiple local copies per project must remain
+    // structurally possible). V1.2 M1 sanctions exactly one exception: the
+    // PARTIAL display-primary index scoped to is_primary = 1, which still
+    // allows any number of non-primary bindings per project.
     const indexes = db
       .prepare(
-        `SELECT name FROM sqlite_master
+        `SELECT name, sql FROM sqlite_master
          WHERE type = 'index' AND tbl_name = 'local_repositories'`,
       )
-      .all() as Array<{ name: string }>;
+      .all() as Array<{ name: string; sql: string | null }>;
     for (const index of indexes) {
-      const sql = (
-        db.prepare(
-          "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-        ).get(index.name) as { sql: string | null }
-      ).sql;
-      if (sql && sql.toUpperCase().includes("UNIQUE")) {
-        expect(sql.toUpperCase()).not.toContain("PROJECT_ID");
-      }
+      if (!index.sql || !index.sql.toUpperCase().includes("UNIQUE")) continue;
+      if (!index.sql.toUpperCase().includes("PROJECT_ID")) continue;
+      // Only the M1 partial display-primary index may reference project_id,
+      // and it must stay partial (is_primary = 1 rows only).
+      expect(index.name).toBe("idx_local_repo_project_primary");
+      expect(index.sql.toUpperCase()).toContain("WHERE");
+      expect(index.sql.toUpperCase()).toContain("IS_PRIMARY = 1");
     }
 
     // The column itself must exist and reference projects.

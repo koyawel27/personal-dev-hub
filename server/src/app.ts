@@ -29,6 +29,7 @@ import {
   deriveSourceState,
   getProjectDetail,
   listProjects,
+  setPrimaryLocalBinding,
   trackGitHubRepository,
   untrackGitHubRepository,
   updateProjectMetadata,
@@ -169,6 +170,16 @@ export function createApp(): express.Express {
       res.json(
         deleteRepository(requireId(req.params.id, "repository"), { confirmDeleteProject }),
       );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/repositories/:id/primary", (req, res, next) => {
+    try {
+      // V1.2 M1: display-primary switch — a pure UI/source preference flip.
+      // No Git operation, no filesystem access, no development Activity event.
+      res.json(setPrimaryLocalBinding(requireId(req.params.id, "repository")));
     } catch (err) {
       next(err);
     }
