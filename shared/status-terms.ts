@@ -42,6 +42,18 @@ export function githubTerm(hasGitHubRemote: boolean): GitHubTerm {
   return hasGitHubRemote ? "GitHub Connected" : "Local Only";
 }
 
+/**
+ * V1.2 M2: user-facing local-binding health meanings (M2-J wording).
+ * "OK" is phrased as a last-scan statement — never live verification.
+ * Relative/absolute time composition stays on the client (D9).
+ */
+export const LOCAL_BINDING_HEALTH_TERMS = {
+  UNSCANNED: "Not scanned yet",
+  OK: "Last scanned",
+  PATH_MISSING: "Path missing",
+  NOT_A_GIT_REPO: "Not a Git repository",
+} as const;
+
 export const QUALIFYING_ACTIVITY_TYPES = [
   "commit_observed",
   "working_tree_dirty",

@@ -9,7 +9,7 @@ import { removeLocalBinding } from "../lib/removeLocalBinding";
 import { StatusBadge } from "../components/Badge";
 import { MetadataEditor } from "../components/MetadataEditor";
 import { SourceBadge } from "../components/SourceBadge";
-import { eventLabel, formatDateTime, shortSha } from "../format";
+import { eventLabel, formatDateTime, localBindingHealthLabel, localBindingHealthTitle, shortSha } from "../format";
 
 type Tab = "overview" | "commits" | "activity";
 
@@ -109,6 +109,9 @@ export function ProjectDetailPage() {
   const isGithubOnly = project.sourceState === "GITHUB ONLY";
   const hasLocal = project.sourceState !== "GITHUB ONLY" && bindingRepoId != null;
   const snapshot = project.snapshot;
+  // V1.2 M2: bindings arrive display-primary first; the compact health label
+  // describes ONLY that primary binding (conservative M2-I presentation).
+  const primaryBinding = project.localBindings?.[0] ?? null;
 
   return (
     <div>
@@ -319,9 +322,15 @@ export function ProjectDetailPage() {
                       <span className="mono muted">{LOCAL_REMOTE_DISCLAIMER}</span>
                     </div>
                   </>
-                ) : (
-                  <div className="muted">Scan</div>
-                )}
+                ) : null}
+                {primaryBinding ? (
+                  <>
+                    <div className="muted">Health</div>
+                    <div title={localBindingHealthTitle(primaryBinding.health)}>
+                      {localBindingHealthLabel(primaryBinding.health)}
+                    </div>
+                  </>
+                ) : null}
               </div>
               {hasLocal ? (
                 <div className="header-actions" style={{ marginTop: 16 }}>

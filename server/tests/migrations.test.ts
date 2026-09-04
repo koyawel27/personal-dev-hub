@@ -85,6 +85,7 @@ const EXPECTED_MIGRATIONS = [
   "006_project_activity",
   "007_repair_zero_binding_ghosts",
   "008_primary_local_binding",
+  "009_local_binding_health",
 ];
 
 describe("Ordered migrations", () => {

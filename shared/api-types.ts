@@ -359,10 +359,50 @@ export type ProjectListItemDto = {
   lastMeaningfulAt: string | null;
 };
 
+/**
+ * V1.2 M2: health of one local binding.
+ *
+ * OK means "OK as of the last explicit scan/refresh" — it is a cached Git
+ * verdict, never a claim of live verification during page rendering.
+ * PATH_MISSING and UNSCANNED are derived at read time (live filesystem
+ * existence check / absent cache) and are never persisted.
+ */
+export type LocalBindingHealthState =
+  | "UNSCANNED"
+  | "OK"
+  | "PATH_MISSING"
+  | "NOT_A_GIT_REPO";
+
+export type LocalBindingHealthDto = {
+  state: LocalBindingHealthState;
+  /** When the cached state was last explicitly verified; null for derived states. */
+  checkedAt: string | null;
+};
+
+/**
+ * V1.2 M2: one local binding of a Project as read data. Each binding owns
+ * its own path, latest snapshot, and health — Project-level legacy fields
+ * keep deriving ONLY from the server-authoritative display primary.
+ */
+export type ProjectLocalBindingDto = {
+  id: number;
+  isPrimary: boolean;
+  name: string;
+  localPath: string;
+  canonicalPath: string;
+  discoveryType: DiscoveryType;
+  sourceId: number | null;
+  lastScannedAt: string | null;
+  snapshot: SnapshotDto | null;
+  health: LocalBindingHealthDto;
+};
+
 /** Source-aware project detail served by GET /api/projects/:id. */
 export type ProjectDetailDto = ProjectListItemDto & {
   projectNote: string | null;
   snapshot: SnapshotDto | null;
+  /** Every local binding of the Project: display primary first, then id ASC. */
+  localBindings: ProjectLocalBindingDto[];
   githubMetadata: GitHubMetadataDto | null;
   commits: Array<{
     sha: string;

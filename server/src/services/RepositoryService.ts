@@ -407,8 +407,10 @@ function persistInspection(
     }
 
     db.prepare(
-      "UPDATE local_repositories SET last_scanned_at = ?, name = ? WHERE id = ?",
-    ).run(observedAt, repo.name, repo.id);
+      // V1.2 M2-F: a successful explicit inspection is a live Git verdict —
+      // cache it as OK as of this observation (alongside last_scanned_at).
+      "UPDATE local_repositories SET last_scanned_at = ?, name = ?, last_health_state = 'OK', last_health_checked_at = ? WHERE id = ?",
+    ).run(observedAt, repo.name, observedAt, repo.id);
 
     persistActivityEvents(repo.id, events);
   });
@@ -1003,8 +1005,28 @@ export function deleteRepository(
 export async function refreshRepository(id: number): Promise<RepositoryDetail> {
   return withScanLock(async () => {
     const repo = getRepoRow(id);
+    // V1.2 M2-G: honesty for explicit refreshes. A missing tracked folder is
+    // PATH_NOT_FOUND, not a Git verdict — Git must not even be spawned when
+    // existence has already failed. (A present directory that fails Git
+    // worktree validation stays NOT_GIT_REPOSITORY below.)
+    if (!fs.existsSync(repo.local_path)) {
+      throw new AppError(
+        ErrorCodes.PATH_NOT_FOUND,
+        "The repository folder was not found on disk.",
+        404,
+      );
+    }
     const isRepo = await isRepository(repo.local_path);
     if (!isRepo) {
+      // V1.2 M2-F: the path exists but explicit Git validation failed —
+      // cache that verdict as of now, keep last_scanned_at and the last
+      // valid historical snapshot untouched, write no fake snapshot, then
+      // surface the existing NOT_GIT_REPOSITORY error.
+      getDb()
+        .prepare(
+          "UPDATE local_repositories SET last_health_state = 'NOT_A_GIT_REPO', last_health_checked_at = ? WHERE id = ?",
+        )
+        .run(nowIso(), id);
       throw new AppError(
         ErrorCodes.NOT_GIT_REPOSITORY,
         "The selected folder is not a Git repository.",
