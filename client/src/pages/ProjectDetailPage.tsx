@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useInvalidate } from "../useApi";
 import { notifyMutations } from "../lib/mutations";
 import type { ActivityEventDto, ProjectDetailDto } from "@shared/api-types";
-import { LOCAL_REMOTE_DISCLAIMER } from "@shared/status-terms";
 import { ApiError, client } from "../api";
 import { removeLocalBinding } from "../lib/removeLocalBinding";
 import { StatusBadge } from "../components/Badge";
+import { LocalBindingsPanel } from "../components/LocalBindingsPanel";
 import { MetadataEditor } from "../components/MetadataEditor";
 import { SourceBadge } from "../components/SourceBadge";
-import { eventLabel, formatDateTime, localBindingHealthLabel, localBindingHealthTitle, shortSha } from "../format";
+import { eventLabel, formatDateTime } from "../format";
 
 type Tab = "overview" | "commits" | "activity";
 
@@ -25,7 +25,6 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const id = Number(params.id);
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
-  const [bindingRepoId, setBindingRepoId] = useState<number | null>(null);
   const [bindingGhId, setBindingGhId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEventDto[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
@@ -35,19 +34,10 @@ export function ProjectDetailPage() {
   async function load() {
     const detail = await client.project(id);
     setProject(detail.project);
-    // Resolve registered identifiers for safe actions: the primary local
-    // binding (if any) and this project's tracked GitHub binding id, which
-    // the picker payload exposes directly for tracked rows.
-    const repos = await client.repositories();
-    // V1.2 M1: consume ONLY the server-authoritative effective primary
-    // (explicit is_primary=1, else the server's MIN(id) defensive fallback).
-    // Clients never derive a primary from row order or repository name, so
-    // there is deliberately NO first-row fallback here.
-    const binding =
-      repos.repositories.find(
-        (repo) => repo.projectId === id && repo.isPrimary,
-      ) ?? null;
-    setBindingRepoId(binding?.id ?? null);
+    // V1.2 M3: project.localBindings IS the authoritative binding read model.
+    // The display-primary binding (for the header launcher/rescan actions)
+    // comes from the server's isPrimary flag — never re-derived from
+    // GET /api/repositories (no second authority, no row-order fallback).
     if (detail.project.githubMetadata != null && detail.project.githubFullName != null) {
       const picker = await client.githubPicker();
       const ghBinding = picker.entries.find(
@@ -103,15 +93,48 @@ export function ProjectDetailPage() {
     }
   }
 
+  /**
+   * V1.2 M3 Add Local Copy: native folder selection first, then the
+   * project-targeted attach endpoint. The server's evidence ladder may
+   * answer LOCAL_BINDING_CONFIRM_REQUIRED — its summary is shown verbatim
+   * and the attach retries with confirmUnverified=true only after the
+   * owner accepts. Declining (or cancelling the picker) changes nothing.
+   */
+  async function addLocalCopy() {
+    if (!project) return;
+    const selection = await client.selectFolder();
+    if (!selection.selected || selection.path == null) return;
+    try {
+      await client.addLocalBinding(project.id, selection.path);
+    } catch (err: unknown) {
+      if (
+        !(err instanceof ApiError) ||
+        err.code !== "LOCAL_BINDING_CONFIRM_REQUIRED"
+      ) {
+        throw err;
+      }
+      const attach = window.confirm(
+        `${err.message}\n\nAttach this folder to "${project.name}" anyway?`,
+      );
+      if (!attach) return;
+      await client.addLocalBinding(project.id, selection.path, true);
+    }
+    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+    await load();
+  }
+
   if (!project && !error) return <p className="muted">Loading…</p>;
   if (!project) return <div className="error">{error}</div>;
 
   const isGithubOnly = project.sourceState === "GITHUB ONLY";
-  const hasLocal = project.sourceState !== "GITHUB ONLY" && bindingRepoId != null;
+  // V1.2 M3: header launcher/rescan actions operate on the display-primary
+  // binding resolved from project.localBindings via the server's isPrimary
+  // flag — the same single authority the Local Copies panel uses. No
+  // array-order, name-order, or repositories-list fallback exists.
+  const primaryBinding = project.localBindings.find((binding) => binding.isPrimary) ?? null;
+  const hasLocal = primaryBinding != null;
+  const primaryBindingId = primaryBinding?.id ?? null;
   const snapshot = project.snapshot;
-  // V1.2 M2: bindings arrive display-primary first; the compact health label
-  // describes ONLY that primary binding (conservative M2-I presentation).
-  const primaryBinding = project.localBindings?.[0] ?? null;
 
   return (
     <div>
@@ -147,19 +170,19 @@ export function ProjectDetailPage() {
         <div className="header-actions">
           {hasLocal ? (
             <>
-              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "folder"))}>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(primaryBindingId!, "folder"))}>
                 Open Folder
               </button>
-              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "terminal"))}>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(primaryBindingId!, "terminal"))}>
                 Open Terminal
               </button>
-              <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId!, "vscode"))}>
+              <button type="button" disabled={busy} onClick={() => run(() => client.open(primaryBindingId!, "vscode"))}>
                 Open VS Code
               </button>
             </>
           ) : null}
-          {project.githubHtmlUrl && bindingRepoId != null ? (
-            <button type="button" disabled={busy} onClick={() => run(() => client.open(bindingRepoId, "github"))}>
+          {project.githubHtmlUrl && primaryBindingId != null ? (
+            <button type="button" disabled={busy} onClick={() => run(() => client.open(primaryBindingId, "github"))}>
               Open GitHub
             </button>
           ) : project.githubHtmlUrl ? (
@@ -182,7 +205,7 @@ export function ProjectDetailPage() {
               disabled={busy}
               onClick={() =>
                 run(async () => {
-                  await client.refresh(bindingRepoId!);
+                  await client.refresh(primaryBindingId!);
                   await load();
                 })
               }
@@ -294,73 +317,53 @@ export function ProjectDetailPage() {
             onError={(message) => setError(message)}
           />
 
-          {!isGithubOnly ? (
-            <>
-              <h2>
-                <span className="h2-mark" aria-hidden="true" />
-                Local repository
-                <span className="domain-tag mono">local source</span>
-              </h2>
-              <div className="detail-grid">
-                <div className="muted">Path</div>
-                <div className="mono">{project.localPath}</div>
-                <div className="muted">Branch</div>
-                <div className="mono">{snapshot?.branch ?? "—"}</div>
-                <div className="muted">HEAD</div>
-                <div className="mono">{shortSha(snapshot?.headCommitSha)}</div>
-                {snapshot ? (
-                  <>
-                    <div className="muted">Working tree</div>
-                    <div>
-                      <span className={`pill ${snapshot.isDirty ? "warn" : "clean"}`}>
-                        {snapshot.isDirty ? "Uncommitted" : "Clean"}
-                      </span>
-                      {`  modified ${snapshot.modifiedCount} · staged ${snapshot.stagedCount} · untracked ${snapshot.untrackedCount}`}
-                    </div>
-                    <div className="muted">Sync</div>
-                    <div>
-                      <span className="mono muted">{LOCAL_REMOTE_DISCLAIMER}</span>
-                    </div>
-                  </>
-                ) : null}
-                {primaryBinding ? (
-                  <>
-                    <div className="muted">Health</div>
-                    <div title={localBindingHealthTitle(primaryBinding.health)}>
-                      {localBindingHealthLabel(primaryBinding.health)}
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              {hasLocal ? (
-                <div className="header-actions" style={{ marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
-                          return;
-                        }
-                        const result = await removeLocalBinding(bindingRepoId!);
-                        // Reconcile every view first; if the project auto-deleted,
-                        // this route no longer exists and we leave it cleanly.
-                        notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
-                        if (result.projectDeleted) {
-                          navigate("/projects", { replace: true });
-                          return;
-                        }
-                        await load();
-                      })
-                    }
-                  >
-                    Remove local copy from dashboard
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : null}
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Local copies
+            <span className="domain-tag mono">local bindings</span>
+          </h2>
+          {/* V1.2 M3: every local binding from the server-authoritative
+              Project Detail read model — one row per copy with its own
+              health/snapshot, per-binding safe actions, and the native
+              Add Local Copy flow. Renders for all source states. */}
+          <LocalBindingsPanel
+            bindings={project.localBindings ?? []}
+            busy={busy}
+            onAdd={() => run(addLocalCopy)}
+            onOpen={(bindingId, action) => run(() => client.open(bindingId, action))}
+            onRescan={(bindingId) =>
+              run(async () => {
+                await client.refresh(bindingId);
+                await load();
+              })
+            }
+            onMakePrimary={(bindingId) =>
+              run(async () => {
+                // Display-primary flip: pure preference change (no Git, no
+                // filesystem, no activity event). Server order is the only
+                // authority for the refreshed binding list.
+                await client.setLocalPrimary(bindingId);
+                notifyMutations("projects", "sources", "dashboard", "portfolio");
+                await load();
+              })
+            }
+            onRemove={(bindingId) =>
+              run(async () => {
+                if (!window.confirm("Remove this local copy from the dashboard? Files on disk are not deleted.")) {
+                  return;
+                }
+                const result = await removeLocalBinding(bindingId);
+                // Reconcile every view first; if the project auto-deleted,
+                // this route no longer exists and we leave it cleanly.
+                notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+                if (result.projectDeleted) {
+                  navigate("/projects", { replace: true });
+                  return;
+                }
+                await load();
+              })
+            }
+          />
 
           {project.githubMetadata ? (
             <>

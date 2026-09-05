@@ -269,6 +269,32 @@ export type SetPrimaryLocalBindingResponse = {
   primaryRepositoryId: number;
 };
 
+/**
+ * V1.2 M3: request for POST /api/projects/:projectId/local-bindings
+ * (owner-directed Add Local Copy). The Project already exists; the folder is
+ * attached to it directly — no Project is created, moved, or replaced.
+ */
+export type AddLocalBindingRequest = {
+  path: string;
+  /**
+   * Owner confirmation for the unverified-evidence flow (M3-E): the first
+   * attempt without it may be answered with LOCAL_BINDING_CONFIRM_REQUIRED;
+   * retrying with true attaches after the owner accepted the evidence
+   * summary. It can NEVER bypass a strong identity conflict.
+   */
+  confirmUnverified?: boolean;
+};
+
+/**
+ * V1.2 M3: success response for Add Local Copy. The new binding plus the
+ * full server-authoritative Project Detail read model, so the client can
+ * reconcile every binding surface from one payload without refetching.
+ */
+export type AddLocalBindingResponse = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
 export type RepositoryListItem = {
   id: number;
   /** Owning project id (V1.1: metadata lives on the Project). */

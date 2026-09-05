@@ -14,6 +14,7 @@ import {
 } from "./services/ProjectDiscoveryService.js";
 import {
   addManualRepository,
+  attachLocalBinding,
   deleteRepository,
   getRepositoryDetail,
   listActivity,
@@ -209,6 +210,23 @@ export function createApp(): express.Express {
       await updateProjectMetadata(requireId(req.params.id, "repository"), req.body);
       const project = await getProjectDetail(requireId(req.params.id, "repository"));
       res.json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.2 M3: owner-directed Add Local Copy — attach an existing local Git
+  // folder to THIS project as another local binding. The Project already
+  // exists and is never duplicated; Git is read-only; evidence rules may
+  // demand explicit owner confirmation (LOCAL_BINDING_CONFIRM_REQUIRED) or
+  // reject a strong identity conflict outright.
+  app.post("/api/projects/:id/local-bindings", async (req, res, next) => {
+    try {
+      const result = await attachLocalBinding(requireId(req.params.id, "repository"), {
+        path: req.body?.path,
+        confirmUnverified: req.body?.confirmUnverified,
+      });
+      res.status(201).json(result);
     } catch (err) {
       next(err);
     }

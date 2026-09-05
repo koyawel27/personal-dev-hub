@@ -1,5 +1,6 @@
 import type {
   ActivityEventDto,
+  AddLocalBindingResponse,
   ApiErrorBody,
   ContributionDayDto,
   DailyDetailResponse,
@@ -94,6 +95,16 @@ export const client = {
       `/api/repositories/${localRepositoryId}/primary`,
       { method: "POST" },
     ),
+  // V1.2 M3: Add Local Copy — attach an existing local Git folder to an
+  // EXISTING project. The id is a PROJECT id; confirmUnverified=true is the
+  // owner's explicit answer to LOCAL_BINDING_CONFIRM_REQUIRED.
+  addLocalBinding: (projectId: number, path: string, confirmUnverified?: boolean) =>
+    api<AddLocalBindingResponse>(`/api/projects/${projectId}/local-bindings`, {
+      method: "POST",
+      body: JSON.stringify(
+        confirmUnverified ? { path, confirmUnverified: true } : { path },
+      ),
+    }),
   open: (
     localRepositoryId: number,
     action: "folder" | "terminal" | "vscode" | "github",

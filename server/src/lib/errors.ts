@@ -28,6 +28,11 @@ export const ErrorCodes = {
   GITHUB_REPO_NOT_FOUND: "GITHUB_REPO_NOT_FOUND",
   GITHUB_REPO_CONFLICT: "GITHUB_REPO_CONFLICT",
   ALREADY_TRACKED: "ALREADY_TRACKED",
+  // V1.2 M3 Add Local Copy evidence ladder: the folder could not be
+  // verified against the target Project (owner confirmation required), and
+  // the strong-conflict rejection that confirmation can NEVER bypass.
+  LOCAL_BINDING_CONFIRM_REQUIRED: "LOCAL_BINDING_CONFIRM_REQUIRED",
+  LOCAL_BINDING_IDENTITY_CONFLICT: "LOCAL_BINDING_IDENTITY_CONFLICT",
   LAUNCHER_FAILED: "LAUNCHER_FAILED",
   FOLDER_PICKER_FAILED: "FOLDER_PICKER_FAILED",
   FOLDER_PICKER_UNSUPPORTED: "FOLDER_PICKER_UNSUPPORTED",

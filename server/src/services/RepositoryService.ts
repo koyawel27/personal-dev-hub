@@ -7,6 +7,8 @@ import type {
   DashboardResponse,
   DeleteLocalBindingResponse,
   GitHubMetadataDto,
+  ProjectDetailDto,
+  ProjectLocalBindingDto,
   RemoteDto,
   RepositoryDetail,
   RepositoryListItem,
@@ -40,6 +42,8 @@ import {
 import {
   ensureSinglePrimary,
   finalizeProjectAfterFinalBindingRemoval,
+  getProjectDetail,
+  getProjectRow,
 } from "./ProjectService.js";
 import { fetchGitHubRepoMetadata } from "./GitHubService.js";
 import { inspectRepository, isRepository, type GitInspection } from "./GitService.js";
@@ -313,6 +317,20 @@ function persistInspection(
   observedAt: string,
   isNew: boolean,
 ): void {
+  // Thin transactional wrapper: the write body is shared with the V1.2 M3
+  // attach flow, which must run it inside its OWN atomic transaction
+  // together with the binding INSERT (M3-C).
+  withTransaction(() => {
+    writeInspection(repo, inspection, observedAt, isNew);
+  });
+}
+
+function writeInspection(
+  repo: RepoRow,
+  inspection: GitInspection,
+  observedAt: string,
+  isNew: boolean,
+): void {
   const previous = previousFromSnapshot(latestSnapshot(repo.id));
   const known = knownCommitShas(repo.id);
   const events = deriveActivityEvents({
@@ -324,96 +342,94 @@ function persistInspection(
     observedAt,
   });
 
-  withTransaction(() => {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO repository_snapshots (
-         local_repository_id, branch, head_commit_sha, is_dirty, modified_count,
-         staged_count, untracked_count, upstream_ref, ahead_count, behind_count, captured_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO repository_snapshots (
+       local_repository_id, branch, head_commit_sha, is_dirty, modified_count,
+       staged_count, untracked_count, upstream_ref, ahead_count, behind_count, captured_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    repo.id,
+    inspection.branch,
+    inspection.headCommitSha,
+    inspection.workingTree.isDirty ? 1 : 0,
+    inspection.workingTree.modifiedCount,
+    inspection.workingTree.stagedCount,
+    inspection.workingTree.untrackedCount,
+    inspection.upstreamRef,
+    inspection.aheadCount,
+    inspection.behindCount,
+    observedAt,
+  );
+
+  const insertCommit = db.prepare(
+    `INSERT OR IGNORE INTO commits
+      (local_repository_id, commit_sha, subject, author_name, committed_at, first_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  for (const commit of inspection.recentCommits) {
+    insertCommit.run(
       repo.id,
-      inspection.branch,
-      inspection.headCommitSha,
-      inspection.workingTree.isDirty ? 1 : 0,
-      inspection.workingTree.modifiedCount,
-      inspection.workingTree.stagedCount,
-      inspection.workingTree.untrackedCount,
-      inspection.upstreamRef,
-      inspection.aheadCount,
-      inspection.behindCount,
+      commit.sha,
+      commit.subject,
+      commit.authorName,
+      commit.committedAt || null,
       observedAt,
     );
+  }
 
-    const insertCommit = db.prepare(
-      `INSERT OR IGNORE INTO commits
-        (local_repository_id, commit_sha, subject, author_name, committed_at, first_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+  const seenNames = new Set<string>();
+  const upsertRemote = db.prepare(
+    `INSERT INTO git_remotes (
+       local_repository_id, name, url, host, owner, repository_name,
+       github_repository_id, is_primary, last_seen_at
+     ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+     ON CONFLICT(local_repository_id, name) DO UPDATE SET
+       url = excluded.url,
+       host = excluded.host,
+       owner = excluded.owner,
+       repository_name = excluded.repository_name,
+       is_primary = excluded.is_primary,
+       last_seen_at = excluded.last_seen_at`,
+  );
+
+  const primaryName =
+    inspection.remotes.find((remote) => remote.name === "origin")?.name ??
+    inspection.remotes[0]?.name ??
+    null;
+
+  for (const remote of inspection.remotes) {
+    seenNames.add(remote.name);
+    const gh = parseGitHubRemote(remote.url);
+    upsertRemote.run(
+      repo.id,
+      remote.name,
+      remote.url,
+      gh?.host ?? remoteHost(remote.url),
+      gh?.owner ?? null,
+      gh?.repository ?? null,
+      remote.name === primaryName ? 1 : 0,
+      observedAt,
     );
-    for (const commit of inspection.recentCommits) {
-      insertCommit.run(
-        repo.id,
-        commit.sha,
-        commit.subject,
-        commit.authorName,
-        commit.committedAt || null,
-        observedAt,
-      );
-    }
+  }
 
-    const seenNames = new Set<string>();
-    const upsertRemote = db.prepare(
-      `INSERT INTO git_remotes (
-         local_repository_id, name, url, host, owner, repository_name,
-         github_repository_id, is_primary, last_seen_at
-       ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(local_repository_id, name) DO UPDATE SET
-         url = excluded.url,
-         host = excluded.host,
-         owner = excluded.owner,
-         repository_name = excluded.repository_name,
-         is_primary = excluded.is_primary,
-         last_seen_at = excluded.last_seen_at`,
-    );
-
-    const primaryName =
-      inspection.remotes.find((remote) => remote.name === "origin")?.name ??
-      inspection.remotes[0]?.name ??
-      null;
-
-    for (const remote of inspection.remotes) {
-      seenNames.add(remote.name);
-      const gh = parseGitHubRemote(remote.url);
-      upsertRemote.run(
-        repo.id,
-        remote.name,
-        remote.url,
-        gh?.host ?? remoteHost(remote.url),
-        gh?.owner ?? null,
-        gh?.repository ?? null,
-        remote.name === primaryName ? 1 : 0,
-        observedAt,
-      );
-    }
-
-    if (seenNames.size > 0) {
-      const placeholders = [...seenNames].map(() => "?").join(", ");
-      db.prepare(
-        `DELETE FROM git_remotes
-         WHERE local_repository_id = ? AND name NOT IN (${placeholders})`,
-      ).run(repo.id, ...seenNames);
-    } else {
-      db.prepare("DELETE FROM git_remotes WHERE local_repository_id = ?").run(repo.id);
-    }
-
+  if (seenNames.size > 0) {
+    const placeholders = [...seenNames].map(() => "?").join(", ");
     db.prepare(
-      // V1.2 M2-F: a successful explicit inspection is a live Git verdict —
-      // cache it as OK as of this observation (alongside last_scanned_at).
-      "UPDATE local_repositories SET last_scanned_at = ?, name = ?, last_health_state = 'OK', last_health_checked_at = ? WHERE id = ?",
-    ).run(observedAt, repo.name, observedAt, repo.id);
+      `DELETE FROM git_remotes
+       WHERE local_repository_id = ? AND name NOT IN (${placeholders})`,
+    ).run(repo.id, ...seenNames);
+  } else {
+    db.prepare("DELETE FROM git_remotes WHERE local_repository_id = ?").run(repo.id);
+  }
 
-    persistActivityEvents(repo.id, events);
-  });
+  db.prepare(
+    // V1.2 M2-F: a successful explicit inspection is a live Git verdict —
+    // cache it as OK as of this observation (alongside last_scanned_at).
+    "UPDATE local_repositories SET last_scanned_at = ?, name = ?, last_health_state = 'OK', last_health_checked_at = ? WHERE id = ?",
+  ).run(observedAt, repo.name, observedAt, repo.id);
+
+  persistActivityEvents(repo.id, events);
 }
 
 async function enrichGitHub(repoId: number): Promise<void> {
@@ -481,6 +497,7 @@ function upsertDiscoveredRepo(
   readablePath: string,
   sourceId: number | null,
   discoveryType: "scanned" | "manual",
+  options: { targetProjectId?: number } = {},
 ): { repo: RepoRow; isNew: boolean } {
   const identity = pathIdentity(readablePath);
   const existing = findRepoByIdentity(identity);
@@ -498,25 +515,33 @@ function upsertDiscoveredRepo(
   const name = repositoryNameFromPath(readablePath);
   const db = getDb();
 
-  // Every binding must belong to a project (004 invariant). A brand-new
-  // local repository starts as its own project; reconcileTrackedIdentity()
-  // below may later merge it into an already-tracked GitHub-only project.
-  const projectResult = db
-    .prepare(
-      `INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)`,
-    )
-    .run(name, createdAt, createdAt);
-  const projectId = Number(projectResult.lastInsertRowid);
+  // Every binding must belong to a project (004 invariant). V1.2 M3: an
+  // owner-directed attach targets an EXISTING Project and joins it directly
+  // — no project is created, moved, or adopted. Otherwise a brand-new local
+  // repository starts as its own project; reconcileTrackedIdentity() below
+  // may later merge it into an already-tracked GitHub-only project.
+  let projectId: number;
+  if (options.targetProjectId != null) {
+    projectId = options.targetProjectId;
+  } else {
+    const projectResult = db
+      .prepare(
+        `INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)`,
+      )
+      .run(name, createdAt, createdAt);
+    projectId = Number(projectResult.lastInsertRowid);
+  }
 
   const result = db
     .prepare(
       `INSERT INTO local_repositories
         (source_id, project_id, is_primary, name, local_path, canonical_path, discovery_type, created_at, last_scanned_at)
        VALUES (?, ?,
-         -- V1.2 M1 new-binding invariant: the first local binding of a
+         -- V1.2 M1 new-binding invariant: the FIRST local binding of a
          -- project is explicitly its display primary (no DEFAULT-0 +
-         -- read-fallback reliance for newly created projects). Subquery
-         -- covers the pre-existing-bindings case; 1 for a brand-new project.
+         -- read-fallback reliance). Additional bindings attach as
+         -- non-primary and never override the chosen primary — identical
+         -- semantics for standalone creation and M3 targeted attach.
          CASE WHEN EXISTS (
            SELECT 1 FROM local_repositories lr2 WHERE lr2.project_id = ?
          ) THEN 0 ELSE 1 END,
@@ -944,6 +969,249 @@ export async function addManualRepository(input: { path: unknown }): Promise<Rep
     const { repo, isNew } = upsertDiscoveredRepo(readable, null, "manual");
     await refreshRepoRow(repo, isNew);
     return getRepositoryDetail(repo.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// V1.2 M3 — owner-directed Add Local Copy (attach to an EXISTING Project).
+// ---------------------------------------------------------------------------
+
+/** Bounded M3-E evidence verdict for one Add Local Copy attempt. */
+type AttachmentEvidence =
+  | { kind: "strong"; summary: string }
+  | { kind: "conflict"; summary: string }
+  | { kind: "unverified"; summary: string };
+
+/** Recognized GitHub identities (lowercased "owner/repo") for one side. */
+function recognizedGitHubIdentitiesForProject(projectId: number): Set<string> {
+  const identities = new Set<string>();
+  const db = getDb();
+  // The Project's tracked GitHub binding (0..1) is authoritative identity…
+  const tracked = db
+    .prepare(
+      "SELECT owner, name FROM github_repositories WHERE project_id = ?",
+    )
+    .all(projectId) as Array<{ owner: string; name: string }>;
+  for (const row of tracked) {
+    identities.add(`${row.owner}/${row.name}`.toLowerCase());
+  }
+  // …and every recognized GitHub remote across its existing local bindings.
+  const remotes = db
+    .prepare(
+      `SELECT r.url FROM git_remotes r
+       JOIN local_repositories lr ON lr.id = r.local_repository_id
+       WHERE lr.project_id = ?`,
+    )
+    .all(projectId) as Array<{ url: string }>;
+  for (const row of remotes) {
+    const parsed = parseGitHubRemote(row.url);
+    if (parsed) identities.add(`${parsed.owner}/${parsed.repository}`.toLowerCase());
+  }
+  return identities;
+}
+
+/** Every commit SHA already known under the Project (local + GitHub cache). */
+function knownProjectCommitShas(projectId: number): Set<string> {
+  const rows = getDb()
+    .prepare(
+      `SELECT lower(commit_sha) AS sha FROM commits c
+       JOIN local_repositories lr ON lr.id = c.local_repository_id
+       WHERE lr.project_id = ?
+       UNION
+       SELECT lower(commit_sha) AS sha FROM github_commits WHERE project_id = ?`,
+    )
+    .all(projectId, projectId) as Array<{ sha: string }>;
+  return new Set(rows.map((row) => row.sha));
+}
+
+/**
+ * M3-E evidence ladder. STRONG POSITIVE = recognized remote identity match
+ * OR at least one candidate commit SHA already known under the Project.
+ * STRONG CONFLICT = both sides carry recognized repository identities that
+ * disagree AND no positive SHA overlap. Everything else (no recognized
+ * remote, no overlap, one side unusable) is UNVERIFIED — never treated as a
+ * mismatch, resolved by explicit owner confirmation. There is deliberately
+ * NO numeric history threshold: absence of overlap is not proof of mismatch.
+ */
+function evaluateAttachmentEvidence(
+  projectId: number,
+  inspection: GitInspection,
+): AttachmentEvidence {
+  const candidateIdentities = new Set<string>();
+  for (const remote of inspection.remotes) {
+    const parsed = parseGitHubRemote(remote.url);
+    if (parsed) {
+      candidateIdentities.add(`${parsed.owner}/${parsed.repository}`.toLowerCase());
+    }
+  }
+  const projectIdentities = recognizedGitHubIdentitiesForProject(projectId);
+  const identityMatch = [...candidateIdentities].some((identity) =>
+    projectIdentities.has(identity),
+  );
+
+  const candidateShas = new Set<string>();
+  if (inspection.headCommitSha) candidateShas.add(inspection.headCommitSha.toLowerCase());
+  for (const commit of inspection.recentCommits) {
+    candidateShas.add(commit.sha.toLowerCase());
+  }
+  let overlapCount = 0;
+  if (candidateShas.size > 0) {
+    const known = knownProjectCommitShas(projectId);
+    for (const sha of candidateShas) {
+      if (known.has(sha)) overlapCount += 1;
+    }
+  }
+
+  if (identityMatch) {
+    const matched = [...candidateIdentities].find((identity) =>
+      projectIdentities.has(identity),
+    );
+    return {
+      kind: "strong",
+      summary: `The folder's Git remote (${matched}) matches this project's tracked GitHub identity.`,
+    };
+  }
+  if (overlapCount > 0) {
+    return {
+      kind: "strong",
+      summary: `${overlapCount} commit${overlapCount === 1 ? "" : "s"} in this folder match commits already known for this project.`,
+    };
+  }
+  if (candidateIdentities.size > 0 && projectIdentities.size > 0) {
+    return {
+      kind: "conflict",
+      summary:
+        `This folder identifies as ${[...candidateIdentities].join(", ")}, which does not match this project's GitHub identity (${[...projectIdentities].join(", ")}), ` +
+        "and none of its commits match this project's history. Attaching an unrelated repository to this project is not allowed.",
+    };
+  }
+  return {
+    kind: "unverified",
+    summary:
+      "Personal Dev Hub could not verify that this folder belongs to this project: no recognized GitHub remote matches this project and none of its commits overlap this project's history. " +
+      "This is not proof of a mismatch — confirm the folder is a copy of this project's repository before attaching it.",
+  };
+}
+
+export type AttachLocalBindingResult = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
+/**
+ * V1.2 M3: attach an existing local Git repository folder to an EXISTING
+ * Project as an additional (or first) local binding.
+ *
+ * - The Project already exists; nothing is created, moved, or re-keyed.
+ *   The canonical-path check never steals a binding from another Project
+ *   (M4 Relink owns path replacement).
+ * - Shared safe logic with the standalone manual add: path normalization
+ *   (resolveExistingDirectory), canonical identity (pathIdentity), Git
+ *   worktree validation (isRepository), read-only inspection
+ *   (inspectRepository), and the SAME persistence pipeline (writeInspection)
+ *   that stores snapshot/commits/remotes/M2 health.
+ * - Atomicity (M3-C): all filesystem/Git validation and the evidence
+ *   inspection happen BEFORE any write; binding INSERT + snapshot + commits
+ *   + remotes + health + events then commit in ONE transaction, so a
+ *   persistence failure leaves zero residue and the primary invariant intact.
+ * - Primary assignment reuses the M1 new-binding invariant: the first local
+ *   binding of a Project attaches as is_primary=1 (GITHUB ONLY -> LOCAL +
+ *   GITHUB); additional bindings attach as is_primary=0 and never touch the
+ *   chosen primary, the fingerprint anchor, or top-level primary fields.
+ * - NO Git write operation exists anywhere on this path: Git is invoked only
+ *   through the frozen READ-ONLY operation set during this explicit,
+ *   owner-requested validation.
+ */
+export async function attachLocalBinding(
+  projectId: number,
+  input: { path: unknown; confirmUnverified?: unknown },
+): Promise<AttachLocalBindingResult> {
+  return withScanLock(async () => {
+    getProjectRow(projectId); // 404 when the Project does not exist
+
+    const { readable, identity } = resolveExistingDirectory(input.path);
+    const existing = findRepoByIdentity(identity);
+    if (existing) {
+      if (existing.project_id === projectId) {
+        throw new AppError(
+          ErrorCodes.REPOSITORY_ALREADY_TRACKED,
+          "That folder is already attached to this project.",
+        );
+      }
+      const owner =
+        existing.project_id != null
+          ? (
+              getDb()
+                .prepare("SELECT name FROM projects WHERE id = ?")
+                .get(existing.project_id) as { name: string } | undefined
+            )?.name
+          : null;
+      throw new AppError(
+        ErrorCodes.REPOSITORY_ALREADY_TRACKED,
+        `That folder is already attached to ${owner ? `project "${owner}"` : "another project"}. A binding cannot be moved between projects; remove it there first.`,
+      );
+    }
+    if (!(await isRepository(readable))) {
+      throw new AppError(
+        ErrorCodes.NOT_GIT_REPOSITORY,
+        "The selected folder is not a Git repository.",
+      );
+    }
+
+    // Read-only inspection BEFORE any irreversible write: this both powers
+    // the evidence model and guarantees no DB row exists for a folder that
+    // Git cannot read. The frozen read-only operation set is the only Git
+    // surface used here.
+    const inspection = await inspectRepository(readable);
+    const evidence = evaluateAttachmentEvidence(projectId, inspection);
+    if (evidence.kind === "conflict") {
+      // Strong conflicts are final: owner confirmation must NOT bypass them.
+      throw new AppError(
+        ErrorCodes.LOCAL_BINDING_IDENTITY_CONFLICT,
+        evidence.summary,
+        409,
+      );
+    }
+    if (evidence.kind === "unverified" && input.confirmUnverified !== true) {
+      throw new AppError(
+        ErrorCodes.LOCAL_BINDING_CONFIRM_REQUIRED,
+        evidence.summary,
+        409,
+      );
+    }
+
+    const observedAt = nowIso();
+    const bindingId = withTransaction(() => {
+      const { repo, isNew } = upsertDiscoveredRepo(readable, null, "manual", {
+        targetProjectId: projectId,
+      });
+      writeInspection(repo, inspection, observedAt, isNew);
+      // Defensive primary backstop (no-op for well-formed states; the INSERT
+      // CASE above already assigns first-vs-additional correctly).
+      ensureSinglePrimary(projectId);
+      return repo.id;
+    });
+
+    // Optional GitHub cache enrichment — mirrors refreshRepository: failure
+    // must never fail an already-committed local attach.
+    try {
+      await enrichGitHub(bindingId);
+    } catch {
+      // GitHub enrichment is optional and must not break local attachment.
+    }
+
+    const detail = await getProjectDetail(projectId);
+    const binding = detail.project.localBindings.find(
+      (candidate) => candidate.id === bindingId,
+    );
+    if (!binding) {
+      throw new AppError(
+        ErrorCodes.INTERNAL_ERROR,
+        "The attached local copy could not be read back.",
+        500,
+      );
+    }
+    return { binding, project: detail.project };
   });
 }
 
