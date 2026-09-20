@@ -33,6 +33,11 @@ export const ErrorCodes = {
   // the strong-conflict rejection that confirmation can NEVER bypass.
   LOCAL_BINDING_CONFIRM_REQUIRED: "LOCAL_BINDING_CONFIRM_REQUIRED",
   LOCAL_BINDING_IDENTITY_CONFLICT: "LOCAL_BINDING_IDENTITY_CONFLICT",
+  // V1.2 M4 Safe Relink: the candidate folder could not be verified as the
+  // SAME repository as the existing binding (owner confirmation required),
+  // and the strong-mismatch rejection that confirmation can NEVER bypass.
+  LOCAL_BINDING_RELINK_CONFIRM_REQUIRED: "LOCAL_BINDING_RELINK_CONFIRM_REQUIRED",
+  LOCAL_BINDING_RELINK_IDENTITY_CONFLICT: "LOCAL_BINDING_RELINK_IDENTITY_CONFLICT",
   LAUNCHER_FAILED: "LAUNCHER_FAILED",
   FOLDER_PICKER_FAILED: "FOLDER_PICKER_FAILED",
   FOLDER_PICKER_UNSUPPORTED: "FOLDER_PICKER_UNSUPPORTED",

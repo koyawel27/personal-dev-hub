@@ -390,7 +390,19 @@ function writeInspection(
        owner = excluded.owner,
        repository_name = excluded.repository_name,
        is_primary = excluded.is_primary,
-       last_seen_at = excluded.last_seen_at`,
+       last_seen_at = excluded.last_seen_at,
+       -- V1.2 M4-O stale-cache hardening: when an existing remote NAME is
+       -- observed with a CHANGED URL/recognized identity, the cached
+       -- github_repository_id (which points at the OLD URL's repository) is
+       -- no longer valid. Invalidate it so a later optional enrichGitHub()
+       -- failure can never leave a stale GitHub association attached to a
+       -- URL that now names a different repository. When the URL is
+       -- unchanged the cached association is preserved as before.
+       github_repository_id = CASE
+         WHEN git_remotes.url = excluded.url
+           THEN git_remotes.github_repository_id
+         ELSE NULL
+       END`,
   );
 
   const primaryName =
@@ -1208,6 +1220,280 @@ export async function attachLocalBinding(
       throw new AppError(
         ErrorCodes.INTERNAL_ERROR,
         "The attached local copy could not be read back.",
+        500,
+      );
+    }
+    return { binding, project: detail.project };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// V1.2 M4 — Safe Relink / Moved-Path Recovery.
+// ---------------------------------------------------------------------------
+
+/** Bounded M4 evidence verdict for one Relink attempt. */
+type RelinkEvidence =
+  | { kind: "strong"; summary: string }
+  | { kind: "conflict"; summary: string }
+  | { kind: "unverified"; summary: string };
+
+/** Recognized GitHub identities (lowercased "owner/repo") from ONE binding's stored remotes. */
+function recognizedGitHubIdentitiesForBinding(bindingId: number): Set<string> {
+  const identities = new Set<string>();
+  const rows = getDb()
+    .prepare("SELECT url FROM git_remotes WHERE local_repository_id = ?")
+    .all(bindingId) as Array<{ url: string }>;
+  for (const row of rows) {
+    const parsed = parseGitHubRemote(row.url);
+    if (parsed) identities.add(`${parsed.owner}/${parsed.repository}`.toLowerCase());
+  }
+  return identities;
+}
+
+/** Every commit SHA already observed for ONE binding (local history). */
+function knownBindingCommitShas(bindingId: number): Set<string> {
+  const rows = getDb()
+    .prepare("SELECT lower(commit_sha) AS sha FROM commits WHERE local_repository_id = ?")
+    .all(bindingId) as Array<{ sha: string }>;
+  return new Set(rows.map((row) => row.sha));
+}
+
+/**
+ * M4 D4 evidence ladder — LOCKED. There is NO numeric commit threshold.
+ *
+ * Candidate evidence comes ONLY from the explicit read-only inspection
+ * (recognized GitHub remotes, headCommitSha, recentCommits). Historical
+ * evidence uses the EXISTING binding FIRST (its stored git_remotes + its
+ * commits); the owning Project MAY supplement it (tracked GitHub binding,
+ * other local bindings' remotes, cached github_commits, other bindings'
+ * commits). Folder/repo/branch names, subjects, authors, and timestamps are
+ * NEVER identity evidence.
+ *
+ * STRONG MATCH  = candidate recognized identity ∩ historical identity
+ *                 OR ≥1 candidate SHA ∩ known SHA history (one overlap is
+ *                 positive lineage evidence; no arbitrary count required).
+ * STRONG MISMATCH = candidate identities non-empty AND historical identities
+ *                 non-empty AND empty intersection AND zero SHA overlap —
+ *                 positive conflicting evidence; confirmation must NOT bypass.
+ * INSUFFICIENT  = everything else (one side lacks recognized identity, no
+ *                 SHA overlap, shallow/new history). NOT a mismatch; resolved
+ *                 by explicit owner confirmation.
+ */
+function evaluateRelinkEvidence(
+  bindingId: number,
+  projectId: number,
+  inspection: GitInspection,
+): RelinkEvidence {
+  // Candidate side: recognized GitHub identities from THIS inspection only.
+  const candidateIdentities = new Set<string>();
+  for (const remote of inspection.remotes) {
+    const parsed = parseGitHubRemote(remote.url);
+    if (parsed) {
+      candidateIdentities.add(`${parsed.owner}/${parsed.repository}`.toLowerCase());
+    }
+  }
+
+  // Historical side: the existing binding FIRST, then the Project's other
+  // evidence (tracked GitHub binding + sibling bindings' remotes).
+  const bindingIdentities = recognizedGitHubIdentitiesForBinding(bindingId);
+  const projectIdentities = recognizedGitHubIdentitiesForProject(projectId);
+  const historicalIdentities = new Set<string>([
+    ...bindingIdentities,
+    ...projectIdentities,
+  ]);
+
+  const identityMatch = [...candidateIdentities].some((identity) =>
+    historicalIdentities.has(identity),
+  );
+
+  // Candidate SHAs from THIS inspection (head + recent log).
+  const candidateShas = new Set<string>();
+  if (inspection.headCommitSha) candidateShas.add(inspection.headCommitSha.toLowerCase());
+  for (const commit of inspection.recentCommits) {
+    candidateShas.add(commit.sha.toLowerCase());
+  }
+
+  // Known SHAs: this binding's stored commits FIRST, then project-wide
+  // (sibling bindings + the GitHub commit cache) as a supplement.
+  const bindingShas = knownBindingCommitShas(bindingId);
+  const projectShas = knownProjectCommitShas(projectId);
+  let overlapCount = 0;
+  for (const sha of candidateShas) {
+    if (bindingShas.has(sha) || projectShas.has(sha)) overlapCount += 1;
+  }
+
+  if (identityMatch) {
+    const matched = [...candidateIdentities].find((identity) =>
+      historicalIdentities.has(identity),
+    );
+    return {
+      kind: "strong",
+      summary: `The folder's Git remote (${matched}) matches this binding's known repository identity.`,
+    };
+  }
+  if (overlapCount > 0) {
+    return {
+      kind: "strong",
+      summary: `${overlapCount} commit${overlapCount === 1 ? "" : "s"} in this folder match commits already known for this binding.`,
+    };
+  }
+  if (candidateIdentities.size > 0 && historicalIdentities.size > 0) {
+    return {
+      kind: "conflict",
+      summary:
+        `This folder identifies as ${[...candidateIdentities].join(", ")}, which does not match this binding's known repository identity (${[...historicalIdentities].join(", ")}), ` +
+        "and none of its commits overlap the known history. Relinking to an unrelated repository is not allowed. The binding was not changed.",
+    };
+  }
+  return {
+    kind: "unverified",
+    summary:
+      "Personal Dev Hub could not verify that this folder is the same repository: no recognized GitHub remote matches this binding and none of its commits overlap the known history. " +
+      "This is insufficient evidence, not proof of a mismatch — the binding remains unchanged until you confirm the new folder is the same repository.",
+  };
+}
+
+export type RelinkLocalBindingResult = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
+/**
+ * V1.2 M4: point an EXISTING local binding at a replacement filesystem
+ * location (folder moved / renamed / relocated) WITHOUT destroying or
+ * recreating it. Same binding identity + new path + explicit read-only
+ * validation + preserved history.
+ *
+ * - PRESERVES the existing local_repositories row: id, project_id,
+ *   is_primary, created_at, source_id, and discovery_type are never touched;
+ *   no replacement row is inserted and the owning Project is never changed.
+ *   repository_snapshots / commits / activity_events stay attached to the
+ *   SAME binding id; the MIN(id) fingerprint anchor is therefore unchanged.
+ * - Validation BEFORE any write: resolveExistingDirectory (path validity /
+ *   existence / directory), canonical-path conflict rejection, isRepository,
+ *   and inspectRepository use the SAME frozen READ-ONLY Git operations and
+ *   helpers as scan/refresh/Add Local Copy. No path normalization is
+ *   duplicated.
+ * - Atomicity: the path/canonical/name update + appended snapshot + commits
+ *   + remotes + M2 health + derived events commit in ONE transaction; a
+ *   persistence failure rolls the path back and leaves history intact.
+ * - Relink never calls reconcileTrackedIdentity / upsertDiscoveredRepo: no
+ *   adoption, no Project move, no merge, no new repository_discovered event.
+ * - Relinking the PRIMARY binding moves the Project's top-level
+ *   localPath/snapshot (they derive from the display primary); relinking a
+ *   SECONDARY binding leaves the primary and top-level fields untouched.
+ */
+export async function relinkLocalBinding(
+  bindingId: number,
+  input: { path: unknown; confirmUnverified?: unknown },
+): Promise<RelinkLocalBindingResult> {
+  return withScanLock(async () => {
+    const repo = getRepoRow(bindingId); // 404 when the binding does not exist
+    const projectId = repo.project_id;
+    if (projectId == null) {
+      throw new AppError(
+        ErrorCodes.INVALID_REQUEST,
+        "That local repository does not belong to a Project.",
+        400,
+      );
+    }
+
+    const { readable, identity } = resolveExistingDirectory(input.path);
+
+    // M4-E canonical-path conflicts, checked BEFORE any mutation.
+    const conflict = findRepoByIdentity(identity);
+    if (conflict) {
+      if (conflict.id === bindingId) {
+        // Same stored identity: no Relink occurred, no fake history. Use Rescan.
+        throw new AppError(
+          ErrorCodes.REPOSITORY_ALREADY_TRACKED,
+          "This binding already points to that folder. Use Rescan instead.",
+        );
+      }
+      // The candidate folder already belongs to ANOTHER binding (same or
+      // another Project). Reject: never merge, move, or delete either side.
+      const owner =
+        conflict.project_id != null
+          ? (
+              getDb()
+                .prepare("SELECT name FROM projects WHERE id = ?")
+                .get(conflict.project_id) as { name: string } | undefined
+            )?.name
+          : null;
+      throw new AppError(
+        ErrorCodes.REPOSITORY_ALREADY_TRACKED,
+        `That folder is already tracked ${owner ? `by project "${owner}"` : "by another binding"}. A binding cannot be moved or merged; remove the other binding first.`,
+      );
+    }
+
+    if (!(await isRepository(readable))) {
+      // M4-M: an invalid candidate does NOT mark the OLD binding
+      // NOT_A_GIT_REPO — the candidate has not become the binding.
+      throw new AppError(
+        ErrorCodes.NOT_GIT_REPOSITORY,
+        "The selected folder is not a Git repository.",
+      );
+    }
+
+    // Read-only inspection BEFORE any irreversible write: this powers the
+    // evidence model and guarantees no write happens for a folder Git cannot
+    // read. Only the frozen READ-ONLY operation set is used.
+    const inspection = await inspectRepository(readable);
+
+    // M4 D4 evidence classification. Strong mismatch is final; insufficient
+    // evidence requires explicit owner confirmation.
+    const evidence = evaluateRelinkEvidence(bindingId, projectId, inspection);
+    if (evidence.kind === "conflict") {
+      throw new AppError(
+        ErrorCodes.LOCAL_BINDING_RELINK_IDENTITY_CONFLICT,
+        evidence.summary,
+        409,
+      );
+    }
+    if (evidence.kind === "unverified" && input.confirmUnverified !== true) {
+      throw new AppError(
+        ErrorCodes.LOCAL_BINDING_RELINK_CONFIRM_REQUIRED,
+        evidence.summary,
+        409,
+      );
+    }
+
+    // All validation and the evidence decision are complete; only now mutate.
+    // ONE transaction covers the path update plus the full appended
+    // inspection so any failure rolls the path back and leaves history intact.
+    const observedAt = nowIso();
+    const newName = repositoryNameFromPath(readable);
+    withTransaction(() => {
+      getDb()
+        .prepare(
+          // Only the filesystem location and the binding-local (derived) name
+          // change. id / project_id / is_primary / created_at / source_id /
+          // discovery_type are deliberately untouched.
+          "UPDATE local_repositories SET local_path = ?, canonical_path = ?, name = ? WHERE id = ?",
+        )
+        .run(readable, identity, newName, bindingId);
+      // Append a fresh explicit inspection through the SAME persistence
+      // pipeline as scan/refresh/Add Local Copy. isNew=false: Relink never
+      // fabricates a repository_discovered event — the binding already existed.
+      writeInspection(getRepoRow(bindingId), inspection, observedAt, false);
+    });
+
+    // Optional GitHub cache enrichment — mirrors refreshRepository: failure
+    // must never fail an already-committed local Relink.
+    try {
+      await enrichGitHub(bindingId);
+    } catch {
+      // GitHub enrichment is optional and must not break local relink.
+    }
+
+    const detail = await getProjectDetail(projectId);
+    const binding = detail.project.localBindings.find(
+      (candidate) => candidate.id === bindingId,
+    );
+    if (!binding) {
+      throw new AppError(
+        ErrorCodes.INTERNAL_ERROR,
+        "The relinked local copy could not be read back.",
         500,
       );
     }

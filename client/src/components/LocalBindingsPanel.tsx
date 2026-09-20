@@ -17,6 +17,7 @@ type LocalBindingsPanelProps = {
   onAdd: () => void;
   onOpen: (bindingId: number, action: LaunchAction) => void;
   onRescan: (bindingId: number) => void;
+  onRelink: (bindingId: number) => void;
   onMakePrimary: (bindingId: number) => void;
   onRemove: (bindingId: number) => void;
 };
@@ -38,6 +39,7 @@ export function LocalBindingsPanel({
   onAdd,
   onOpen,
   onRescan,
+  onRelink,
   onMakePrimary,
   onRemove,
 }: LocalBindingsPanelProps) {
@@ -142,6 +144,15 @@ export function LocalBindingsPanel({
                     onClick={() => onRescan(binding.id)}
                   >
                     Rescan
+                  </button>
+                  <button
+                    type="button"
+                    className="subtle"
+                    disabled={busy}
+                    title="Choose the current folder for this existing binding. History is preserved; files on disk are never moved."
+                    onClick={() => onRelink(binding.id)}
+                  >
+                    Relink…
                   </button>
                   {!binding.isPrimary ? (
                     <button

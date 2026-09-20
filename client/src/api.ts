@@ -12,6 +12,7 @@ import type {
   PortfolioItemDto,
   ProjectDetailDto,
   ProjectListItemDto,
+  RelinkLocalBindingResponse,
   RepositoryDetail,
   RepositoryListItem,
   SetPrimaryLocalBindingResponse,
@@ -94,6 +95,20 @@ export const client = {
     api<SetPrimaryLocalBindingResponse>(
       `/api/repositories/${localRepositoryId}/primary`,
       { method: "POST" },
+    ),
+  // V1.2 M4: Safe Relink — point the SAME existing binding at a moved/renamed
+  // folder. The id is the EXISTING LOCAL REPOSITORY binding id; binding
+  // identity and history are preserved. confirmUnverified=true is the owner's
+  // explicit answer to LOCAL_BINDING_RELINK_CONFIRM_REQUIRED.
+  relinkLocalBinding: (localRepositoryId: number, path: string, confirmUnverified?: boolean) =>
+    api<RelinkLocalBindingResponse>(
+      `/api/repositories/${localRepositoryId}/relink`,
+      {
+        method: "POST",
+        body: JSON.stringify(
+          confirmUnverified ? { path, confirmUnverified: true } : { path },
+        ),
+      },
     ),
   // V1.2 M3: Add Local Copy — attach an existing local Git folder to an
   // EXISTING project. The id is a PROJECT id; confirmUnverified=true is the

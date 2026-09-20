@@ -20,6 +20,7 @@ import {
   listActivity,
   listRepositories,
   refreshRepository,
+  relinkLocalBinding,
   scanAllSources,
   scanSource,
 } from "./services/RepositoryService.js";
@@ -181,6 +182,21 @@ export function createApp(): express.Express {
       // V1.2 M1: display-primary switch — a pure UI/source preference flip.
       // No Git operation, no filesystem access, no development Activity event.
       res.json(setPrimaryLocalBinding(requireId(req.params.id, "repository")));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/repositories/:id/relink", async (req, res, next) => {
+    try {
+      // V1.2 M4: Safe Relink — point the SAME existing binding at a moved /
+      // renamed / relocated folder. Binding identity, Project ownership, and
+      // history are preserved; the candidate is validated read-only first.
+      const result = await relinkLocalBinding(
+        requireId(req.params.id, "repository"),
+        { path: req.body?.path, confirmUnverified: req.body?.confirmUnverified },
+      );
+      res.json(result);
     } catch (err) {
       next(err);
     }

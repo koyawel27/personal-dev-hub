@@ -5,6 +5,7 @@ import { notifyMutations } from "../lib/mutations";
 import type { ActivityEventDto, ProjectDetailDto } from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { removeLocalBinding } from "../lib/removeLocalBinding";
+import { relinkLocalBinding } from "../lib/relinkLocalBinding";
 import { StatusBadge } from "../components/Badge";
 import { LocalBindingsPanel } from "../components/LocalBindingsPanel";
 import { MetadataEditor } from "../components/MetadataEditor";
@@ -119,6 +120,25 @@ export function ProjectDetailPage() {
       if (!attach) return;
       await client.addLocalBinding(project.id, selection.path, true);
     }
+    notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
+    await load();
+  }
+
+  /**
+   * V1.2 M4 Safe Relink: native folder selection first, then the
+   * binding-targeted relink endpoint for the EXISTING binding id. The server's
+   * evidence ladder may answer LOCAL_BINDING_RELINK_CONFIRM_REQUIRED — its
+   * summary is shown verbatim and the relink retries with
+   * confirmUnverified=true only after the owner accepts. A strong conflict
+   * surfaces as a plain error with no override. Declining (or cancelling the
+   * picker) changes nothing. On success the Project Detail reloads from the
+   * server and every affected mutation channel is notified.
+   */
+  async function relinkCopy(bindingId: number) {
+    const selection = await client.selectFolder();
+    if (!selection.selected || selection.path == null) return;
+    const result = await relinkLocalBinding(bindingId, selection.path);
+    if (result == null) return; // owner declined the confirmation
     notifyMutations("projects", "sources", "dashboard", "activity", "contributions", "portfolio", "picker");
     await load();
   }
@@ -337,6 +357,7 @@ export function ProjectDetailPage() {
                 await load();
               })
             }
+            onRelink={(bindingId) => run(() => relinkCopy(bindingId))}
             onMakePrimary={(bindingId) =>
               run(async () => {
                 // Display-primary flip: pure preference change (no Git, no

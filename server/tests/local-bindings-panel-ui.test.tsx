@@ -56,6 +56,7 @@ const { clientMocks, MockApiError } = vi.hoisted(() => {
     activity: vi.fn(),
     selectFolder: vi.fn(),
     addLocalBinding: vi.fn(),
+    relinkLocalBinding: vi.fn(),
     setLocalPrimary: vi.fn(),
     refresh: vi.fn(),
     open: vi.fn(),
@@ -533,5 +534,262 @@ describe("GITHUB ONLY Local Copies panel", () => {
       ).toBeTruthy(),
     );
     expect(screen.getByRole("button", { name: "Add local copy" })).toBeTruthy();
+  });
+});
+
+// --- gates 21 + 24: Relink UI (V1.2 M4) -------------------------------------------
+
+describe("Relink UI", () => {
+  it("gate 21: relinks the clicked binding via the native picker, targets its own id, and reloads the new path", async () => {
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: true, path: "C:\\work\\beta-moved" });
+    clientMocks.relinkLocalBinding.mockImplementation(async () => {
+      // Server-authoritative reload: only B's path changes; A stays primary.
+      const movedBeta = bindingFixture({ id: 2, localPath: "C:\\work\\beta-moved" });
+      projectState = projectFixture({
+        localBindings: [alpha, movedBeta],
+        snapshot: alpha.snapshot,
+        localPath: alpha.localPath,
+      });
+      return { binding: movedBeta, project: projectState };
+    });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    // The moved folder path and THIS binding's id (2) reach the endpoint.
+    await waitFor(() =>
+      expect(clientMocks.relinkLocalBinding).toHaveBeenCalledWith(2, "C:\\work\\beta-moved"),
+    );
+    // The primary binding A was never the Relink target.
+    expect(clientMocks.relinkLocalBinding).not.toHaveBeenCalledWith(1, expect.anything());
+
+    // Reloaded server state: B shows the moved path; A is unchanged and Primary.
+    await waitFor(() =>
+      expect(within(bindingsList(container)).getByText("C:\\work\\beta-moved")).toBeTruthy(),
+    );
+    expect(within(bindingsList(container)).getByText("C:\\work\\alpha")).toBeTruthy();
+    expect(screen.getAllByText("Primary")).toHaveLength(1);
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+  });
+
+  it("gate 24: picker cancel calls no Relink endpoint and changes nothing", async () => {
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: false, path: null });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    await waitFor(() => expect(clientMocks.selectFolder).toHaveBeenCalled());
+    // Let the picker-cancel continuation settle deterministically.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(clientMocks.relinkLocalBinding).not.toHaveBeenCalled();
+    // No fake error and no fake success: existing binding state is untouched.
+    expect(container.querySelector(".error")).toBeNull();
+    expect(within(bindingsList(container)).getByText("C:\\work\\beta")).toBeTruthy();
+    expect(within(bindingsList(container)).queryByText("C:\\work\\beta-moved")).toBeNull();
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+  });
+});
+
+// --- gates 22 + 23: Relink confirmation ladder & strong conflict ------------------
+
+describe("Relink confirmation ladder", () => {
+  /** Distinctive server evidence summary so the dialog content is provable. */
+  const SUMMARY =
+    "Personal Dev Hub could not verify that this folder is the same repository: no recognized GitHub remote matches this binding.";
+
+  it("gate 22A: cancellation shows the evidence summary, retries nothing, and keeps the binding unchanged", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: true, path: "C:\\work\\beta-moved" });
+    clientMocks.relinkLocalBinding.mockImplementation(async () => {
+      throw new MockApiError("LOCAL_BINDING_RELINK_CONFIRM_REQUIRED", SUMMARY, 409);
+    });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    // The dialog carried the server's evidence summary verbatim.
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain(SUMMARY);
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    // Exactly ONE attempt; the confirmed retry never happened.
+    expect(clientMocks.relinkLocalBinding).toHaveBeenCalledTimes(1);
+    expect(clientMocks.relinkLocalBinding.mock.calls[0]?.[2]).toBeUndefined();
+    // No fake success and no error banner for a voluntary cancellation.
+    expect(within(bindingsList(container)).getByText("C:\\work\\beta")).toBeTruthy();
+    expect(within(bindingsList(container)).queryByText("C:\\work\\beta-moved")).toBeNull();
+    expect(container.querySelector(".error")).toBeNull();
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+  });
+
+  it("gate 22B: confirming retries the SAME binding/path with confirmUnverified=true and reloads the new path", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: true, path: "C:\\work\\beta-moved" });
+    clientMocks.relinkLocalBinding.mockImplementation(
+      async (_id: number, _path: string, confirmUnverified?: boolean) => {
+        if (confirmUnverified !== true) {
+          throw new MockApiError("LOCAL_BINDING_RELINK_CONFIRM_REQUIRED", SUMMARY, 409);
+        }
+        // Authoritative reload: B's path changes; A stays primary.
+        const movedBeta = bindingFixture({ id: 2, localPath: "C:\\work\\beta-moved" });
+        projectState = projectFixture({
+          localBindings: [alpha, movedBeta],
+          snapshot: alpha.snapshot,
+          localPath: alpha.localPath,
+        });
+        return { binding: movedBeta, project: projectState };
+      },
+    );
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain(SUMMARY);
+    // The retry reuses the SAME binding id and SAME selected path, confirmed.
+    await waitFor(() =>
+      expect(clientMocks.relinkLocalBinding).toHaveBeenNthCalledWith(
+        2,
+        2,
+        "C:\\work\\beta-moved",
+        true,
+      ),
+    );
+    await waitFor(() =>
+      expect(within(bindingsList(container)).getByText("C:\\work\\beta-moved")).toBeTruthy(),
+    );
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+    expect(screen.getAllByText("Primary")).toHaveLength(1);
+  });
+});
+
+// --- gate 23: strong identity conflict (no override exists) -----------------------
+
+describe("Relink strong conflict UI", () => {
+  it("surfaces the server error with no confirmation override dialog and no confirmed retry", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const conflictMessage =
+      "This folder identifies as other/new-repo, which does not match this binding's known repository identity (octo/old-repo). The binding was not changed.";
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: true, path: "C:\\work\\unrelated" });
+    clientMocks.relinkLocalBinding.mockImplementation(async () => {
+      throw new MockApiError("LOCAL_BINDING_RELINK_IDENTITY_CONFLICT", conflictMessage, 409);
+    });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    // The server's hard rejection is surfaced to the owner.
+    await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy());
+    // No confirmation override was offered, and no confirmed retry happened.
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(clientMocks.relinkLocalBinding).toHaveBeenCalledTimes(1);
+    expect(clientMocks.relinkLocalBinding.mock.calls[0]?.[2]).toBeUndefined();
+    // Binding state remains unchanged.
+    expect(within(bindingsList(container)).getByText("C:\\work\\beta")).toBeTruthy();
+    expect(within(bindingsList(container)).queryByText("C:\\work\\unrelated")).toBeNull();
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+  });
+});
+
+// --- gate 25: secondary Relink preserves primary authority ------------------------
+
+describe("Relink secondary binding UI", () => {
+  it("relinks only binding B while A keeps the primary flag, the top-level path, and the header actions", async () => {
+    const alpha = bindingFixture({ id: 1, localPath: "C:\\work\\alpha", isPrimary: true });
+    const beta = bindingFixture({ id: 2, localPath: "C:\\work\\beta" });
+    projectState = projectFixture({
+      localBindings: [alpha, beta],
+      snapshot: alpha.snapshot,
+      localPath: alpha.localPath,
+    });
+    clientMocks.selectFolder.mockResolvedValue({ selected: true, path: "C:\\work\\beta-moved" });
+    clientMocks.relinkLocalBinding.mockImplementation(async () => {
+      const movedBeta = bindingFixture({ id: 2, localPath: "C:\\work\\beta-moved" });
+      // Adversarial server order: B is listed FIRST while A alone carries the
+      // primary flag. Any client row-order fallback would now target B, so the
+      // header assertions below prove the isPrimary flag is the only authority.
+      projectState = projectFixture({
+        localBindings: [movedBeta, alpha],
+        snapshot: alpha.snapshot,
+        localPath: alpha.localPath,
+      });
+      return { binding: movedBeta, project: projectState };
+    });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(bindingsList(container)).toBeTruthy());
+    fireEvent.click(within(row(container, 2)).getByRole("button", { name: /Relink/ }));
+
+    // 1. Relink is invoked with B's binding id, never A's.
+    await waitFor(() =>
+      expect(clientMocks.relinkLocalBinding).toHaveBeenCalledWith(2, "C:\\work\\beta-moved"),
+    );
+    expect(clientMocks.relinkLocalBinding).not.toHaveBeenCalledWith(1, expect.anything());
+
+    // 2. After the authoritative reload: B shows the new path and stays
+    //    non-primary; A remains Primary with exactly one indicator.
+    await waitFor(() =>
+      expect(within(bindingsList(container)).getByText("C:\\work\\beta-moved")).toBeTruthy(),
+    );
+    expect(within(row(container, 2)).queryByText("Primary")).toBeNull();
+    expect(within(row(container, 2)).getByRole("button", { name: "Make primary" })).toBeTruthy();
+    expect(within(row(container, 1)).getByText("Primary")).toBeTruthy();
+    expect(screen.getAllByText("Primary")).toHaveLength(1);
+
+    // 3. Project top-level localPath remains A's path.
+    expect(container.querySelector("p.lede.mono")?.textContent).toContain("C:\\work\\alpha");
+    expect(container.querySelector("p.lede.mono")?.textContent).not.toContain("beta-moved");
+
+    // 4 + 5. Header launcher/rescan still target A's id (never B's).
+    const header = headerActions(container);
+    fireEvent.click(within(header).getByRole("button", { name: "Open Folder" }));
+    await waitFor(() => expect(clientMocks.open).toHaveBeenCalledWith(1, "folder"));
+    fireEvent.click(within(header).getByRole("button", { name: "Rescan" }));
+    await waitFor(() => expect(clientMocks.refresh).toHaveBeenCalledWith(1));
+    expect(clientMocks.refresh).not.toHaveBeenCalledWith(2);
+    // 6. No client-side primary inference: the display primary was resolved
+    //    from the server's isPrimary flag alone, not array position.
+    expect(header).toBeTruthy();
   });
 });

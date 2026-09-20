@@ -295,6 +295,36 @@ export type AddLocalBindingResponse = {
   project: ProjectDetailDto;
 };
 
+/**
+ * V1.2 M4: request for POST /api/repositories/:id/relink (Safe Relink /
+ * Moved-Path Recovery). :id is the EXISTING local_repository binding id —
+ * the SAME binding identity is pointed at a replacement filesystem location
+ * (folder moved/renamed/relocated) without destroying or recreating it.
+ * Relink is never Remove+Add, never a Project change, never a clone.
+ */
+export type RelinkLocalBindingRequest = {
+  path: string;
+  /**
+   * Owner confirmation for the insufficient-evidence flow: the first attempt
+   * without it may be answered with LOCAL_BINDING_RELINK_CONFIRM_REQUIRED;
+   * retrying with true relinks after the owner accepted the evidence summary.
+   * Only the literal boolean true bypasses that gate, and it can NEVER bypass
+   * a strong identity conflict (LOCAL_BINDING_RELINK_IDENTITY_CONFLICT).
+   */
+  confirmUnverified?: boolean;
+};
+
+/**
+ * V1.2 M4: success response for Relink. The SAME binding (unchanged id,
+ * project, primary flag, created_at, source, discovery type) plus the full
+ * server-authoritative Project Detail read model, so the client can reconcile
+ * every binding surface from one payload without refetching.
+ */
+export type RelinkLocalBindingResponse = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
 export type RepositoryListItem = {
   id: number;
   /** Owning project id (V1.1: metadata lives on the Project). */
