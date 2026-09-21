@@ -338,6 +338,7 @@ export function runDeclaredRebuild(
   };
 
   beginFkOff();
+  let committed = false;
   try {
     database.exec("BEGIN IMMEDIATE;");
     try {
@@ -355,6 +356,7 @@ export function runDeclaredRebuild(
 
       recordApplied(database, name);
       database.exec("COMMIT;");
+      committed = true;
     } catch (err) {
       try {
         database.exec("ROLLBACK;");
@@ -386,6 +388,17 @@ export function runDeclaredRebuild(
     if (backupPath) markBackupFailed(backupPath, name);
     restoreFk();
     if (fkBefore !== 1) restoreFk(); // belt-and-braces: always end at ON
+    if (committed) {
+      // The transaction DID commit: the migrated schema is in the database.
+      // Never claim a rollback here — recovery is the preserved backup.
+      throw new Error(
+        `Migration ${name} committed, but post-commit verification failed. ` +
+          `The migrated state IS in the database (not rolled back); ` +
+          `foreign-key enforcement has been restored. ` +
+          `Restore the preserved backup at ${backupPath} before trusting the migrated database. ` +
+          `(${String(err)})`,
+      );
+    }
     throw new Error(
       `Migration ${name} failed and was rolled back. The database was left ` +
         `unchanged; backup preserved at ${backupPath}. (${String(err)})`,

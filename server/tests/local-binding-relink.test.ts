@@ -736,4 +736,3 @@ describe("Relink Git surface", () => {
     }
   });
 });
-

@@ -14,6 +14,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<{
     defaultScanDepth: number;
     gitExecutable: string;
+    dataPath: string;
   } | null>(null);
   const [depthDraft, setDepthDraft] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +133,9 @@ export function SettingsPage() {
         </h2>
         <div className="detail-grid settings-local-grid">
           <div className="muted">App data</div>
-          <div className="mono">data/dashboard.sqlite (project folder)</div>
+          {/* The backend's actual resolved database path (config.dbPath);
+              honest when DASHBOARD_DB_PATH overrides the default. */}
+          <div className="mono">{settings?.dataPath ?? "—"}</div>
         </div>
         <h3 className="settings-subheading">Scanning</h3>
         <form

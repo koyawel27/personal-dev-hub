@@ -58,13 +58,20 @@ describe("declared-rebuild FK safety", () => {
     ].join("\n");
 
     let threw = false;
+    let rollbackMessage = "";
     try {
       runDeclaredRebuild(db as never, "900_broken", broken);
-    } catch {
+    } catch (err) {
       threw = true;
+      rollbackMessage = String((err as Error).message);
     }
 
     expect(threw).toBe(true);
+
+    // Rollback-path wording stays truthful: the transaction never committed.
+    expect(rollbackMessage).toContain("failed and was rolled back");
+    expect(rollbackMessage).toContain("The database was left unchanged");
+    expect(rollbackMessage).not.toContain("committed, but post-commit verification failed");
 
     // FK enforcement restored despite the failure...
     const fk = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })
@@ -109,5 +116,75 @@ describe("declared-rebuild FK safety", () => {
           .get() as { n: number }
       ).n,
     ).toBe(1);
+  });
+
+  it("reports a committed migration truthfully when post-commit FK verification fails", async () => {
+    const { runDeclaredRebuild } = await import("../src/db/migrate.js");
+    const db = makeDb();
+
+    // FK enforcement is disabled inside the rebuild transaction, so this
+    // migration COMMITS a child row referencing a missing parent; the
+    // AFTER-COMMIT PRAGMA foreign_key_check then detects the violation.
+    const fkViolation = [
+      "-- rebuild",
+      "CREATE TABLE parent (id INTEGER PRIMARY KEY);",
+      "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id));",
+      "INSERT INTO child (parent_id) VALUES (999);",
+    ].join("\n");
+
+    let message = "";
+    let threw = false;
+    try {
+      runDeclaredRebuild(db as never, "902_committed_fk_violation", fkViolation);
+    } catch (err) {
+      threw = true;
+      message = String((err as Error).message);
+    }
+
+    expect(threw).toBe(true);
+
+    // The message must reflect the true stage: committed, not rolled back.
+    expect(message).toContain("committed, but post-commit verification failed");
+    expect(message).toContain("not rolled back");
+    expect(message).not.toContain("was rolled back");
+    expect(message).toContain("preserved backup at");
+    expect(message).toContain("foreign_key_check reported");
+
+    // FK enforcement is restored even on this path.
+    const fk = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })
+      .foreign_keys;
+    expect(fk).toBe(1);
+
+    // The claim is real: the committed migrated state exists in the database.
+    const migratedTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'child'")
+      .all();
+    expect(migratedTable).toHaveLength(1);
+    expect(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM schema_migrations WHERE name = '902_committed_fk_violation'",
+          )
+          .get() as { n: number }
+      ).n,
+    ).toBe(1);
+
+    // The attempt's backup is preserved and carries its .failed sidecar.
+    const backupDir = path.join(
+      path.dirname(process.env.DASHBOARD_DB_PATH ?? ""),
+      "backups",
+    );
+    const backups = fs
+      .readdirSync(backupDir)
+      .filter(
+        (file) =>
+          file.startsWith("pre-902_committed_fk_violation-") &&
+          file.endsWith(".sqlite"),
+      );
+    expect(backups).toHaveLength(1);
+    expect(
+      fs.existsSync(path.join(backupDir, `${backups[0]}.902_committed_fk_violation.failed`)),
+    ).toBe(true);
   });
 });

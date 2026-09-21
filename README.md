@@ -52,12 +52,22 @@ npm run build
 | Dashboard | Real summary metrics (tracked/active projects, commits this week from local + tracked GitHub sources, active days, uncommitted repositories), recently active projects derived from meaningful activity (local or GitHub), contribution preview, recent activity journal, needs-attention list (local conditions only) |
 | Projects | Project-centric workspace where each project carries an explicit source badge — LOCAL + GITHUB, LOCAL ONLY, or GITHUB ONLY — with manual status/type/note/portfolio metadata owned by the project; dense table with search and filters |
 | GitHub tracking | Curated picker under Sources → Browse GitHub Repositories: search plus Owned/Collaborator/Organization/Public/Private/Archived/Forks/Tracked/Untracked filters; explicit selection only; picking a repository that matches a local clone's remote links them into one project instead of duplicating it; tracking never clones |
-| Project Detail | Source-aware logbook: local state (branch, working tree, changed files) when a local copy exists; GitHub identity, visibility, default branch, last push for linked repositories; bounded commit history tagged by source; per-project activity journal |
+| Project Detail | All local bindings of the project, each with its own local path, snapshot/state, and health (`OK`, `NOT_A_GIT_REPO`, `PATH_MISSING`, `UNSCANNED`), plus per-binding actions — Open Folder, Terminal, VS Code, Rescan, Relink, Make primary, Remove; Add Local Copy attaches another existing local Git copy to the project; project top-level localPath/snapshot follow the display primary; GitHub identity, visibility, default branch, last push for linked repositories; bounded commit history tagged by source; per-project activity journal |
 | Activity | Global development journal built from fingerprinted events across both origins (commit observed, working-tree transitions, branch changes, GitHub repo tracked/untracked); unchanged rescans and no-op refreshes add nothing |
 | Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (a commit SHA present in both the local and GitHub tracked datasets is counted once, with the overlap reported transparently); counts are commits, never hours; not a full GitHub profile graph |
 | Portfolio | Selected-work view over projects: notes, type/status, technology hints (manifest probes, or GitHub's reported primary language for GitHub-only items), first/latest known commit dates, simple ordering. GitHub-only projects are eligible without a local clone |
-| Sources | Multiple scan roots with depth control, native folder browsing, manual add of individual repositories (each a local binding of a Project), and the GitHub repository picker. Project metadata lives on the Project itself (`PATCH /api/projects/:projectId/metadata`), never on a repository row |
+| Sources | Multiple scan locations with depth control; manual add of a standalone local repository (creates a Project's initial local binding); native folder browsing; GitHub repository picker. Project metadata lives on the Project itself (`PATCH /api/projects/:projectId/metadata`), never on a repository row. Add Local Copy and Relink belong to Project Detail, not the global Sources workflow |
 | Settings | Git executable status, GitHub connection summary (CLI installed / account connected via your existing `gh` login), default scan depth, app data location, rescan controls |
+
+### Multiple local copies, primary, and per-binding health
+
+A Project can track several local Git copies (0..many). One binding is the **display primary** and drives the Project's top-level local path/snapshot; you can change it from Project Detail (**Make primary**). If legacy or malformed data has no explicit primary, the oldest binding (lowest id) is used as a defensive fallback. Permanent activity anchoring also uses the oldest binding, so changing the display primary never re-keys history and performs no Git scan.
+
+**Add Local Copy** attaches another existing local Git copy to the same Project. It never clones: the candidate folder is inspected read-only; a recognized remote identity match or a known shared commit SHA verifies the attachment; ambiguous evidence asks for your confirmation; a conflicting identity is rejected. The first local binding of a GITHUB ONLY project becomes primary; later copies join as non-primary.
+
+**Relink** points an existing binding at a moved/renamed folder: same binding id, Project, history, and stored primary state — the app never moves your files. Unrelated repositories are rejected; uncertain identity may ask for confirmation. Git stays read-only throughout.
+
+Health is per binding: `OK` (verified as a Git worktree at the last explicit scan/refresh), `NOT_A_GIT_REPO` (path exists but was not a Git worktree at the last check), `PATH_MISSING` (the stored path no longer exists), `UNSCANNED` (never inspected). Relink is the recovery path for `PATH_MISSING`.
 
 ## Privacy behavior
 
@@ -70,14 +80,17 @@ npm run build
 
 Everything persists in `data/dashboard.sqlite` inside the project folder (override with the `DASHBOARD_DB_PATH` environment variable). Delete that file to reset the app; your repositories are untouched.
 
+**Automatic migration backups:** declared rebuild migrations (schema-changing operations that recreate tables) automatically snapshot the database before any DDL into `<database-directory>/backups/`. The snapshot uses consistent SQLite semantics that include committed write-ahead-log state, and it is verified (readable, `PRAGMA integrity_check` clean, schema present) before the migration proceeds. A failed attempt's backup is preserved and marked; older ordinary snapshots are pruned, keeping the newest 3. This is migration-safety infrastructure — the app has no user-facing "Create backup now" or restore feature in V1.2.
+
 ## Limitations
 
 - Single user, single machine, desktop-first layout.
 - Ahead/behind is computed from remote-tracking refs already on disk — the app never fetches, so sync state is only as fresh as your own git usage.
 - GitHub-side commits are stored for tracked repositories after a manual refresh (bounded to the most recent ~100 per repository); the GitHub view of Contributions covers exactly that data.
 - Contributions is year-based, with available-year selection (years listed newest-first); it is not a replication of GitHub's full profile contribution graph.
-- A project has at most one GitHub binding in V1.1; multiple local copies per project are supported structurally (the first registered copy is treated as primary).
-- No notifications, background watching/sync daemon, OAuth, cloning, AI features, or team/corporate anything — by design.
+- A project has at most one GitHub binding; local copies are 0..many, with one explicit display primary per project (owner-selectable; oldest-binding fallback for legacy/malformed data).
+- No user-facing manual backup/restore workflow in V1.2 — only the automatic rebuild-migration backups described above.
+- No notifications, background watching/sync daemon, OAuth, cloning, AI features, or team/corporate anything — by design. Advanced mobile polish remains deferred.
 
 ## Disposable test repository
 

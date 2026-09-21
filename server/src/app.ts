@@ -497,6 +497,10 @@ export function createApp(): express.Express {
         settings: {
           defaultScanDepth: getDefaultScanDepth(),
           gitExecutable: resolveGitPath(),
+          // Informational only: the ACTUAL resolved database file in use
+          // (honors DASHBOARD_DB_PATH). Never recompute on the client and
+          // never mutable through PATCH.
+          dataPath: config.dbPath,
         },
       });
     } catch (err) {
@@ -524,6 +528,7 @@ export function createApp(): express.Express {
         settings: {
           defaultScanDepth,
           gitExecutable: resolveGitPath(),
+          dataPath: config.dbPath,
         },
       });
     } catch (err) {

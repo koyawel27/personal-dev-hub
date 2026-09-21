@@ -157,9 +157,13 @@ export const client = {
   },
   githubStatus: () => api<{ status: GitHubStatusDto }>("/api/github/status"),
   settings: () =>
-    api<{ settings: { defaultScanDepth: number; gitExecutable: string } }>("/api/settings"),
+    api<{
+      settings: { defaultScanDepth: number; gitExecutable: string; dataPath: string };
+    }>("/api/settings"),
   updateSettings: (body: { defaultScanDepth?: number }) =>
-    api<{ settings: { defaultScanDepth: number; gitExecutable: string } }>("/api/settings", {
+    api<{
+      settings: { defaultScanDepth: number; gitExecutable: string; dataPath: string };
+    }>("/api/settings", {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
