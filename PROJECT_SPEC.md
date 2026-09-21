@@ -6,7 +6,7 @@
 > Product direction: personal developer workspace / lightweight project tracker  
 > Target: Windows-first, local-first, single-user V1
 
-**Document status:** V1.1 is the last **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is feature-complete on `feature/v1.2` (feature checkpoint `11aafd881514810abc10ee06d9786f749d53a579`) and feature-branch owner acceptance is **complete**; final merge to main, main verification, and the `personal-dev-hub-v1.2-owner-accepted` tag are pending — see `docs/RELEASE_V1.2.md`. Sections below describe the current V1.2 implementation unless explicitly marked historical.
+**Document status:** V1.1 remains the prior **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is **finalized**: feature-complete, owner-accepted, merged to main, verified, and tagged as `personal-dev-hub-v1.2-owner-accepted` (canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`; feature checkpoint `1e330501e8c4e25aca0e2eaff5029f3955756b69`) — see `docs/RELEASE_V1.2.md`. Sections below describe the current V1.2 implementation unless explicitly marked historical.
 
 ---
 
@@ -857,7 +857,7 @@ The central question the product should always answer is:
 
 ## 27. V1.2 definition of done / release status
 
-V1.2 is feature-complete on `feature/v1.2` (feature checkpoint `11aafd881514810abc10ee06d9786f749d53a579`). Release status:
+V1.2 is complete and owner-accepted (feature checkpoint `1e330501e8c4e25aca0e2eaff5029f3955756b69` on `feature/v1.2`; merged to main and tagged `personal-dev-hub-v1.2-owner-accepted`). Release status:
 
 **Complete:**
 
@@ -869,9 +869,8 @@ V1.2 is feature-complete on `feature/v1.2` (feature checkpoint `11aafd881514810a
 - [x] Final full test suite after M6 changes: 47 test files / 303 tests
 - [x] Final production build after M6 changes
 - [x] Owner live acceptance — all items PASS, no console errors, no issues
+- [x] Merge `feature/v1.2` to main
+- [x] Verify merged main (typecheck; 47 / 47 test files; 303 / 303 tests; production build; `git diff --check`; no content difference between `feature/v1.2` and the merge result)
+- [x] Annotated acceptance tag `personal-dev-hub-v1.2-owner-accepted` → canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`, tree `27e770114d078af368ad97da75ce091d727eb0d3` (immutable; `personal-dev-hub-v1.1-owner-accepted` remains immutable, and later documentation-only commits on main do not redefine or move the accepted application checkpoint)
 
-**Pending (release finalization):**
-
-- [ ] Merge `feature/v1.2` to main
-- [ ] Verify main (typecheck + full suite + build)
-- [ ] Annotated tag `personal-dev-hub-v1.2-owner-accepted` (pending — `personal-dev-hub-v1.1-owner-accepted` remains immutable)
+No V1.2 release-finalization item remains pending.

@@ -1,16 +1,18 @@
 # Personal Dev Hub — Release V1.2
 
-**Status:** Owner accepted. Feature branch owner acceptance completed; final main merge and acceptance tag pending.
+**Status:** complete and owner-accepted.
 
-**Feature milestone checkpoint:** `11aafd881514810abc10ee06d9786f749d53a579` (feature/v1.2)
+**Accepted application checkpoint tag:** `personal-dev-hub-v1.2-owner-accepted` (immutable)
 
-**V1.2 branch base / V1.1 docs-aligned main baseline:** `ff00e6413c0db1f0c65711af3914b0d66ffb8fe6`
+**Canonical accepted application commit:** `a32c436b29090543b92af6b501d7ddd755087fb8`
 
-**Final accepted main commit:** PENDING (main merge not yet performed)
+**Accepted application tree:** `27e770114d078af368ad97da75ce091d727eb0d3`
 
-**Final accepted tree:** PENDING
+**Feature milestone checkpoint (historical):** `1e330501e8c4e25aca0e2eaff5029f3955756b69` (feature/v1.2)
 
-**Acceptance tag:** `personal-dev-hub-v1.2-owner-accepted` — PENDING until main is merged and verified. It must never overwrite or reuse `personal-dev-hub-v1.1-owner-accepted`.
+**V1.2 branch base / V1.1 docs-aligned main baseline (historical):** `ff00e6413c0db1f0c65711af3914b0d66ffb8fe6`
+
+> Following the V1.1 release-record pattern: the canonical application commit, tree, and tag above are the release anchor. Later documentation-only commits on main (including this one) do not redefine or move the accepted application checkpoint.
 
 ---
 
@@ -70,6 +72,16 @@ Declared rebuild migrations snapshot the database before any DDL using `VACUUM I
 - git diff --check PASS
 - browser console acceptance: no errors
 
+### Merged-main verification
+
+Verified on main after merging `feature/v1.2` (the merge result has **no content difference** from feature/v1.2 — `feature/v1.2..main` content diff empty):
+
+- typecheck PASS
+- 47 / 47 test files PASS
+- 303 / 303 tests PASS
+- production build PASS
+- git diff --check PASS
+
 ### Release database QA
 
 - Pristine V1.2 database (fresh disposable DB opened through the real app path): PASS
@@ -115,4 +127,6 @@ restore over owner data was performed during owner acceptance.
 
 ## Historical continuity
 
-V1.1 is the last **finalized and tagged** owner-accepted historical release: see `docs/RELEASE_V1.1.md`, tag `personal-dev-hub-v1.1-owner-accepted` (canonical accepted application commit `330c182ebdf528a503568b16bc3831cec8e85589`). **That tag is historical and immutable** — it is never moved, reused, or re-pointed. V1.2 feature-branch owner acceptance is **complete**; the new, distinct `personal-dev-hub-v1.2-owner-accepted` tag will be created only after the main merge is performed and verified.
+V1.1 is the last **finalized and tagged** owner-accepted historical release: see `docs/RELEASE_V1.1.md`, tag `personal-dev-hub-v1.1-owner-accepted` (canonical accepted application commit `330c182ebdf528a503568b16bc3831cec8e85589`). **That tag is historical and immutable** — it is never moved, reused, or re-pointed.
+
+The V1.2 acceptance tag `personal-dev-hub-v1.2-owner-accepted` **now exists and is equally immutable**: it points to canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8` (tree `27e770114d078af368ad97da75ce091d727eb0d3`). Later documentation-only commits on main advance beyond the accepted checkpoint as ordinary release bookkeeping; they do not redefine or move it.
