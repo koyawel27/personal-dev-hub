@@ -257,10 +257,84 @@ export type SnapshotDto = {
   capturedAt: string;
 };
 
+/**
+ * V1.2 M1: response for POST /api/repositories/:id/primary. The switch is a
+ * pure display-preference flip; the payload carries only enough state for
+ * UI/cache reconciliation. The fingerprint anchor is an INTERNAL persistence
+ * identity (owner decision D1) and is deliberately NOT exposed to clients.
+ */
+export type SetPrimaryLocalBindingResponse = {
+  ok: true;
+  projectId: number;
+  primaryRepositoryId: number;
+};
+
+/**
+ * V1.2 M3: request for POST /api/projects/:projectId/local-bindings
+ * (owner-directed Add Local Copy). The Project already exists; the folder is
+ * attached to it directly — no Project is created, moved, or replaced.
+ */
+export type AddLocalBindingRequest = {
+  path: string;
+  /**
+   * Owner confirmation for the unverified-evidence flow (M3-E): the first
+   * attempt without it may be answered with LOCAL_BINDING_CONFIRM_REQUIRED;
+   * retrying with true attaches after the owner accepted the evidence
+   * summary. It can NEVER bypass a strong identity conflict.
+   */
+  confirmUnverified?: boolean;
+};
+
+/**
+ * V1.2 M3: success response for Add Local Copy. The new binding plus the
+ * full server-authoritative Project Detail read model, so the client can
+ * reconcile every binding surface from one payload without refetching.
+ */
+export type AddLocalBindingResponse = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
+/**
+ * V1.2 M4: request for POST /api/repositories/:id/relink (Safe Relink /
+ * Moved-Path Recovery). :id is the EXISTING local_repository binding id —
+ * the SAME binding identity is pointed at a replacement filesystem location
+ * (folder moved/renamed/relocated) without destroying or recreating it.
+ * Relink is never Remove+Add, never a Project change, never a clone.
+ */
+export type RelinkLocalBindingRequest = {
+  path: string;
+  /**
+   * Owner confirmation for the insufficient-evidence flow: the first attempt
+   * without it may be answered with LOCAL_BINDING_RELINK_CONFIRM_REQUIRED;
+   * retrying with true relinks after the owner accepted the evidence summary.
+   * Only the literal boolean true bypasses that gate, and it can NEVER bypass
+   * a strong identity conflict (LOCAL_BINDING_RELINK_IDENTITY_CONFLICT).
+   */
+  confirmUnverified?: boolean;
+};
+
+/**
+ * V1.2 M4: success response for Relink. The SAME binding (unchanged id,
+ * project, primary flag, created_at, source, discovery type) plus the full
+ * server-authoritative Project Detail read model, so the client can reconcile
+ * every binding surface from one payload without refetching.
+ */
+export type RelinkLocalBindingResponse = {
+  binding: ProjectLocalBindingDto;
+  project: ProjectDetailDto;
+};
+
 export type RepositoryListItem = {
   id: number;
   /** Owning project id (V1.1: metadata lives on the Project). */
   projectId: number | null;
+  /**
+   * V1.2 M1: server-authoritative display primary. Exactly one local
+   * binding per project carries this; clients must consume it instead of
+   * re-deriving a primary by name or row order.
+   */
+  isPrimary: boolean;
   name: string;
   localPath: string;
   canonicalPath: string;
@@ -341,10 +415,50 @@ export type ProjectListItemDto = {
   lastMeaningfulAt: string | null;
 };
 
+/**
+ * V1.2 M2: health of one local binding.
+ *
+ * OK means "OK as of the last explicit scan/refresh" — it is a cached Git
+ * verdict, never a claim of live verification during page rendering.
+ * PATH_MISSING and UNSCANNED are derived at read time (live filesystem
+ * existence check / absent cache) and are never persisted.
+ */
+export type LocalBindingHealthState =
+  | "UNSCANNED"
+  | "OK"
+  | "PATH_MISSING"
+  | "NOT_A_GIT_REPO";
+
+export type LocalBindingHealthDto = {
+  state: LocalBindingHealthState;
+  /** When the cached state was last explicitly verified; null for derived states. */
+  checkedAt: string | null;
+};
+
+/**
+ * V1.2 M2: one local binding of a Project as read data. Each binding owns
+ * its own path, latest snapshot, and health — Project-level legacy fields
+ * keep deriving ONLY from the server-authoritative display primary.
+ */
+export type ProjectLocalBindingDto = {
+  id: number;
+  isPrimary: boolean;
+  name: string;
+  localPath: string;
+  canonicalPath: string;
+  discoveryType: DiscoveryType;
+  sourceId: number | null;
+  lastScannedAt: string | null;
+  snapshot: SnapshotDto | null;
+  health: LocalBindingHealthDto;
+};
+
 /** Source-aware project detail served by GET /api/projects/:id. */
 export type ProjectDetailDto = ProjectListItemDto & {
   projectNote: string | null;
   snapshot: SnapshotDto | null;
+  /** Every local binding of the Project: display primary first, then id ASC. */
+  localBindings: ProjectLocalBindingDto[];
   githubMetadata: GitHubMetadataDto | null;
   commits: Array<{
     sha: string;

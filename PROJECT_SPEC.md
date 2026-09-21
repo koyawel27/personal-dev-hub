@@ -6,7 +6,7 @@
 > Product direction: personal developer workspace / lightweight project tracker  
 > Target: Windows-first, local-first, single-user V1
 
-**Document status:** V1.1 is complete and owner-accepted. This spec is retained as design/historical context and has been aligned to the accepted implementation (see `docs/RELEASE_V1.1.md`).
+**Document status:** V1.1 is the last **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is feature-complete on `feature/v1.2` (feature checkpoint `11aafd881514810abc10ee06d9786f749d53a579`) and feature-branch owner acceptance is **complete**; final merge to main, main verification, and the `personal-dev-hub-v1.2-owner-accepted` tag are pending — see `docs/RELEASE_V1.2.md`. Sections below describe the current V1.2 implementation unless explicitly marked historical.
 
 ---
 
@@ -487,7 +487,9 @@ Owns all manual metadata: project status, type, note, include-in-portfolio flag,
 
 ### 15.2 `local_repositories` — local bindings of a Project
 
-Each row carries `project_id` referencing `projects`. There is deliberately **no uniqueness constraint** on `project_id`: the model structurally supports **0..many local bindings per Project** (V1.1 UX treats the first registered copy as primary for single-path displays). Local Git state belongs to these bindings and their satellite tables (`repository_snapshots`, `git_remotes`, `commits` — the latter unique per `(local_repository_id, commit_sha)` with bounded history).
+Each row carries `project_id` referencing `projects`. There is deliberately **no uniqueness constraint** on `project_id`: the model fully supports **0..many local bindings per Project**. Local Git state belongs to these bindings and their satellite tables (`repository_snapshots`, `git_remotes`, `commits` — the latter unique per `(local_repository_id, commit_sha)` with bounded history).
+
+V1.2 (migration `008_primary_local_binding`) adds `is_primary` (0/1, CHECK-constrained) with a **partial unique index** permitting at most **one explicit display primary per Project**; the migration backfills `MIN(id)` per project with local bindings. The display primary is a presentation preference the owner can change — no Git scan and no activity event are involved. When malformed/legacy data has no explicit primary, the read-time defensive fallback is `MIN(id)`. The **permanent fingerprint/activity anchor** (`fingerprintAnchorLocalBindingId`) also remains `MIN(id)`, independent of the display primary, so changing the primary can never re-key historical events. Per-binding health (migration `009`) is covered in 15.8.
 
 ### 15.3 `github_repositories` — the optional GitHub binding
 
@@ -508,6 +510,33 @@ Migration `007_repair_zero_binding_ghosts` repairs zero-source Projects. A zero-
 ### 15.7 Contribution data
 
 Contribution views derive from local `commits` and `github_commits`. The Combined view collapses overlapping SHAs across the local and GitHub tracked datasets and reports deduplication transparently; aggregation is year-based with available-year selection.
+
+### 15.8 Local-binding health (V1.2, migration `009_local_binding_health`)
+
+`local_repositories` carries `last_health_state` / `last_health_checked_at`, caching the outcome of the last **explicit** inspection:
+
+- **Stored** (CHECK-constrained): `OK` — the path existed and was a Git worktree at the last scan/refresh — and `NOT_A_GIT_REPO` — the checked path exists but is not a Git worktree. Backfill: bindings with `last_scanned_at` set became `OK` with `checked_at = last_scanned_at`; never-scanned bindings stay `NULL`.
+- **Derived at read time, never stored:** `PATH_MISSING` (the stored path no longer exists) and `UNSCANNED` (no cached check).
+
+Normal UI reads determine health from the cache plus a filesystem existence check only — they never spawn Git processes merely to render health.
+
+### 15.9 V1.2 local-binding workflows: Add Local Copy and Relink
+
+**Add Local Copy** (Project Detail): an existing Project receives another existing local Git copy as a new local binding. No cloning. The candidate is inspected read-only; a recognized remote identity match or one known shared commit SHA is positive evidence and attaches without confirmation; ambiguous/insufficient evidence requires owner confirmation; a strong recognized identity conflict is rejected. The first local binding of a GITHUB ONLY Project becomes primary; subsequent copies join as non-primary.
+
+**Relink** points the SAME binding at a moved/renamed folder: binding id, Project ownership, history, and stored primary state are preserved; it is not Remove+Add; files are never moved; canonical path collisions are rejected; Git is read-only. Evidence rules match Add Local Copy: one known SHA overlap is positive evidence; absence of SHA overlap alone is never a mismatch; a strong recognized identity conflict with zero known SHA overlap is a hard rejection; uncertain cases require owner confirmation. Relink emits no `repository_discovered` event, and an invalid candidate leaves the old binding's cached health unmutated.
+
+### 15.10 Migration backup hardening (V1.2 M5)
+
+Declared rebuild migrations automatically snapshot the database before any DDL:
+
+- snapshot produced with `VACUUM INTO` on the live `DatabaseSync` connection; the source path derives from `PRAGMA database_list` (main database) — not from configuration
+- includes committed write-ahead-log state (a plain main-file copy would not)
+- the artifact is verified before the rebuild continues: exists, non-empty, opens read-only, `PRAGMA integrity_check == "ok"`, schema objects present
+- failed/unverifiable output is removed; a pre-existing exact destination is protected — never overwritten or deleted
+- `.failed`-marked backups are exempt from pruning and do not consume ordinary retention; retention keeps the newest 3 older ordinary backups (`BACKUP_RETENTION = 3`)
+
+This is migration-safety infrastructure, not a user-facing manual backup/restore UI.
 
 ---
 
@@ -823,3 +852,26 @@ It is:
 The central question the product should always answer is:
 
 > **What have I been building, what am I working on now, and how has my development work evolved over time?**
+
+---
+
+## 27. V1.2 definition of done / release status
+
+V1.2 is feature-complete on `feature/v1.2` (feature checkpoint `11aafd881514810abc10ee06d9786f749d53a579`). Release status:
+
+**Complete:**
+
+- [x] M1–M5 feature work: primary local binding foundation (008), multi-binding read model + per-binding health (009), Add Local Copy, Safe Relink / moved-path recovery, WAL-safe SQLite rebuild backups
+- [x] Pre-M6 deterministic QA baseline: 45 test files / 299 tests; typecheck pass; production build pass
+- [x] M6-B1 tiny polish: stage-aware rebuild failure reporting (rollback vs committed-but-verification-failure); EOF cleanup in `local-binding-relink.test.ts`
+- [x] Fresh-database release QA (pristine DB via the real app path)
+- [x] V1.1 → V1.2 upgrade QA (deterministic automated fixture; owner database snapshot compatibility sanity PASS)
+- [x] Final full test suite after M6 changes: 47 test files / 303 tests
+- [x] Final production build after M6 changes
+- [x] Owner live acceptance — all items PASS, no console errors, no issues
+
+**Pending (release finalization):**
+
+- [ ] Merge `feature/v1.2` to main
+- [ ] Verify main (typecheck + full suite + build)
+- [ ] Annotated tag `personal-dev-hub-v1.2-owner-accepted` (pending — `personal-dev-hub-v1.1-owner-accepted` remains immutable)

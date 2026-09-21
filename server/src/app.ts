@@ -14,11 +14,13 @@ import {
 } from "./services/ProjectDiscoveryService.js";
 import {
   addManualRepository,
+  attachLocalBinding,
   deleteRepository,
   getRepositoryDetail,
   listActivity,
   listRepositories,
   refreshRepository,
+  relinkLocalBinding,
   scanAllSources,
   scanSource,
 } from "./services/RepositoryService.js";
@@ -29,6 +31,7 @@ import {
   deriveSourceState,
   getProjectDetail,
   listProjects,
+  setPrimaryLocalBinding,
   trackGitHubRepository,
   untrackGitHubRepository,
   updateProjectMetadata,
@@ -174,6 +177,31 @@ export function createApp(): express.Express {
     }
   });
 
+  app.post("/api/repositories/:id/primary", (req, res, next) => {
+    try {
+      // V1.2 M1: display-primary switch — a pure UI/source preference flip.
+      // No Git operation, no filesystem access, no development Activity event.
+      res.json(setPrimaryLocalBinding(requireId(req.params.id, "repository")));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/repositories/:id/relink", async (req, res, next) => {
+    try {
+      // V1.2 M4: Safe Relink — point the SAME existing binding at a moved /
+      // renamed / relocated folder. Binding identity, Project ownership, and
+      // history are preserved; the candidate is validated read-only first.
+      const result = await relinkLocalBinding(
+        requireId(req.params.id, "repository"),
+        { path: req.body?.path, confirmUnverified: req.body?.confirmUnverified },
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get("/api/projects", (req, res, next) => {
     try {
       const state = typeof req.query.state === "string" ? req.query.state : undefined;
@@ -198,6 +226,23 @@ export function createApp(): express.Express {
       await updateProjectMetadata(requireId(req.params.id, "repository"), req.body);
       const project = await getProjectDetail(requireId(req.params.id, "repository"));
       res.json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.2 M3: owner-directed Add Local Copy — attach an existing local Git
+  // folder to THIS project as another local binding. The Project already
+  // exists and is never duplicated; Git is read-only; evidence rules may
+  // demand explicit owner confirmation (LOCAL_BINDING_CONFIRM_REQUIRED) or
+  // reject a strong identity conflict outright.
+  app.post("/api/projects/:id/local-bindings", async (req, res, next) => {
+    try {
+      const result = await attachLocalBinding(requireId(req.params.id, "repository"), {
+        path: req.body?.path,
+        confirmUnverified: req.body?.confirmUnverified,
+      });
+      res.status(201).json(result);
     } catch (err) {
       next(err);
     }
@@ -452,6 +497,10 @@ export function createApp(): express.Express {
         settings: {
           defaultScanDepth: getDefaultScanDepth(),
           gitExecutable: resolveGitPath(),
+          // Informational only: the ACTUAL resolved database file in use
+          // (honors DASHBOARD_DB_PATH). Never recompute on the client and
+          // never mutable through PATCH.
+          dataPath: config.dbPath,
         },
       });
     } catch (err) {
@@ -479,6 +528,7 @@ export function createApp(): express.Express {
         settings: {
           defaultScanDepth,
           gitExecutable: resolveGitPath(),
+          dataPath: config.dbPath,
         },
       });
     } catch (err) {

@@ -28,6 +28,10 @@ describe("Settings API", () => {
     expect(res.status).toBe(200);
     expect(res.body.settings.defaultScanDepth).toBe(3);
     expect(res.body.settings.gitExecutable).toBeTruthy();
+    // Release QA defect fix: the reported App data path is the ACTUAL
+    // resolved database file (DASHBOARD_DB_PATH override), not a hardcoded
+    // default. useTempDb() set it in beforeEach.
+    expect(res.body.settings.dataPath).toBe(process.env.DASHBOARD_DB_PATH);
   });
 
   it("persists a new default scan depth across a database reopen", async () => {
@@ -36,6 +40,8 @@ describe("Settings API", () => {
       .send({ defaultScanDepth: 5 });
     expect(patched.status).toBe(200);
     expect(patched.body.settings.defaultScanDepth).toBe(5);
+    // PATCH returns the same complete shape, including the resolved dataPath.
+    expect(patched.body.settings.dataPath).toBe(process.env.DASHBOARD_DB_PATH);
 
     // Simulate restart.
     closeDb();
@@ -59,5 +65,12 @@ describe("Settings API", () => {
       .patch("/api/settings")
       .send({ theme: "dark" });
     expect(unknownKey.status).toBe(400);
+
+    // dataPath is informational, not mutable through Settings.
+    const dataPathAttempt = await request(app)
+      .patch("/api/settings")
+      .send({ dataPath: "C:\\elsewhere.sqlite" });
+    expect(dataPathAttempt.status).toBe(400);
+    expect(dataPathAttempt.body.error.code).toBe("INVALID_REQUEST");
   });
 });

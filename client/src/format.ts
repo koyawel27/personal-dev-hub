@@ -1,3 +1,6 @@
+import type { LocalBindingHealthDto } from "@shared/api-types";
+import { LOCAL_BINDING_HEALTH_TERMS } from "@shared/status-terms";
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -8,6 +11,46 @@ export function formatDateTime(value: string | null | undefined): string {
 export function shortSha(sha: string | null | undefined): string {
   if (!sha) return "—";
   return sha.slice(0, 7);
+}
+
+/**
+ * V1.2 M2: user-facing wording for one local binding's health (M2-J).
+ * Relative time inline, absolute timestamp reserved for the title (D9).
+ * "Last scanned …" is a cached-verdict statement, never live verification.
+ */
+export function localBindingHealthLabel(health: LocalBindingHealthDto): string {
+  switch (health.state) {
+    case "OK":
+      return health.checkedAt
+        ? `Last scanned ${relativeTime(health.checkedAt)}`
+        : LOCAL_BINDING_HEALTH_TERMS.OK;
+    case "NOT_A_GIT_REPO":
+      return health.checkedAt
+        ? `${LOCAL_BINDING_HEALTH_TERMS.NOT_A_GIT_REPO} (checked ${relativeTime(health.checkedAt)})`
+        : LOCAL_BINDING_HEALTH_TERMS.NOT_A_GIT_REPO;
+    case "PATH_MISSING":
+      return LOCAL_BINDING_HEALTH_TERMS.PATH_MISSING;
+    default:
+      return LOCAL_BINDING_HEALTH_TERMS.UNSCANNED;
+  }
+}
+
+/** Hover text for the health label: absolute timestamps where one exists. */
+export function localBindingHealthTitle(health: LocalBindingHealthDto): string {
+  switch (health.state) {
+    case "OK":
+      return health.checkedAt
+        ? `Last scanned ${formatDateTime(health.checkedAt)}`
+        : LOCAL_BINDING_HEALTH_TERMS.OK;
+    case "NOT_A_GIT_REPO":
+      return health.checkedAt
+        ? `Last check ${formatDateTime(health.checkedAt)}: not a Git repository`
+        : LOCAL_BINDING_HEALTH_TERMS.NOT_A_GIT_REPO;
+    case "PATH_MISSING":
+      return "The tracked folder was not found on disk when this page was rendered. No Git check was run; refresh once the folder is back.";
+    default:
+      return "This local copy has not been scanned yet. Rescan to record its first snapshot.";
+  }
 }
 
 /** Compact relative time for dense lists; full timestamps stay in tooltips. */

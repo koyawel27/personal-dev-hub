@@ -1,5 +1,7 @@
 import type {
   GitHubMetadataDto,
+  ProjectLocalBindingDto,
+  SetPrimaryLocalBindingResponse,
   ProjectStatus,
   ProjectType,
   SnapshotDto,
@@ -9,6 +11,7 @@ import { PROJECT_STATUSES, PROJECT_TYPES } from "../../../shared/api-types.js";
 import { parseGitHubRemote, isSafeSegment } from "../../../shared/github-remote.js";
 import { getDb, nowIso, withTransaction } from "../db/client.js";
 import { AppError, ErrorCodes } from "../lib/errors.js";
+import { deriveLocalBindingHealth } from "./BindingHealthService.js";
 import {
   persistActivityEventsDirect,
   type DerivedEvent,
@@ -62,6 +65,83 @@ export function getProjectRow(id: number): ProjectRow {
   return row;
 }
 
+/**
+ * V1.2 M1 — repair the display primary after any local-binding write:
+ * exactly one is_primary=1 per project with local bindings, anchored on
+ * MIN(id) when no explicit primary survives. Defensive backstop for the
+ * transactional paths above; a no-op when the invariant already holds.
+ * Called inside the caller's transaction.
+ */
+export function ensureSinglePrimary(projectId: number): void {
+  const db = getDb();
+  const primary = db
+    .prepare(
+      `SELECT id FROM local_repositories
+       WHERE project_id = ? AND is_primary = 1
+       ORDER BY id ASC LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  if (primary != null) return;
+  const anchor = db
+    .prepare(
+      `SELECT id FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  if (anchor == null) return;
+  db.prepare("UPDATE local_repositories SET is_primary = 1 WHERE id = ?").run(anchor.id);
+}
+
+/**
+ * V1.2 M1 — display-primary switch (POST /api/repositories/:id/primary).
+ * Pure preference flip inside one transaction: unset the project's current
+ * primary, set the selected binding. NO Git call, NO filesystem access, and
+ * NO activity event (a UI/source preference is not development activity).
+ * Returns only enough state for UI/cache reconciliation; the fingerprint
+ * anchor (MIN(id), owner decision D1) is internal persistence identity and
+ * is deliberately NOT part of the API surface.
+ */
+export function setPrimaryLocalBinding(id: number): SetPrimaryLocalBindingResponse {
+  return withTransaction(() => {
+    const db = getDb();
+    const binding = db
+      .prepare(
+        `SELECT id, project_id FROM local_repositories WHERE id = ?`,
+      )
+      .get(id) as { id: number; project_id: number | null } | undefined;
+    if (binding == null) {
+      throw new AppError(ErrorCodes.REPOSITORY_NOT_FOUND, "Repository was not found.", 404);
+    }
+    if (binding.project_id == null) {
+      throw new AppError(
+        ErrorCodes.INVALID_REQUEST,
+        "That local repository does not belong to a Project.",
+        400,
+      );
+    }
+    const alreadyPrimary =
+      (
+        db
+          .prepare(
+            "SELECT is_primary FROM local_repositories WHERE id = ?",
+          )
+          .get(id) as { is_primary: number }
+      ).is_primary === 1;
+    if (!alreadyPrimary) {
+      db.prepare(
+        "UPDATE local_repositories SET is_primary = 0 WHERE project_id = ? AND is_primary = 1",
+      ).run(binding.project_id);
+      db.prepare(
+        "UPDATE local_repositories SET is_primary = 1 WHERE id = ?",
+      ).run(id);
+    }
+    return {
+      ok: true,
+      projectId: binding.project_id,
+      primaryRepositoryId: id,
+    };
+  });
+}
+
 export function githubBindingForProject(projectId: number): GhBindingRow | null {
   return (
     (getDb()
@@ -98,8 +178,39 @@ function lastMeaningfulAt(projectId: number): string | null {
   return row.at ?? null;
 }
 
-/** Primary local copy = lowest binding id (V1.1 presentation rule). */
+/**
+ * V1.2 M1 server-authoritative DISPLAY-PRIMARY resolver.
+ *
+ * 1. explicit is_primary=1 binding (the user-selected primary);
+ * 2. defensive fallback to MIN(id) — repairs legacy/hand-mangled rows that
+ *    lack an explicit primary so user-visible state never disappears.
+ *
+ * This is the ONLY concept the UI sees. It is deliberately distinct from
+ * the fingerprint anchor below (owner decision D1): switching the display
+ * primary must never re-key historical activity.
+ */
 export function primaryLocalBindingId(projectId: number): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM local_repositories
+       WHERE project_id = ?
+       ORDER BY is_primary DESC, id ASC
+       LIMIT 1`,
+    )
+    .get(projectId) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+/**
+ * V1.2 M1 FINGERPRINT ANCHOR (owner decision D1, LOCKED).
+ *
+ * Deterministic MIN(local_repository.id) per project — permanently stable
+ * and completely INDEPENDENT of the display primary. All project-scoped
+ * activity fingerprints resolve their scope segment through this helper;
+ * changing which binding the user displays as primary must never produce
+ * a different fingerprint for the same logical event.
+ */
+export function fingerprintAnchorLocalBindingId(projectId: number): number | null {
   const row = getDb()
     .prepare(
       "SELECT MIN(id) AS id FROM local_repositories WHERE project_id = ?",
@@ -193,11 +304,16 @@ export function listProjects(filter?: { state?: string; query?: string }): Proje
   const items: ProjectListItemDto[] = rows.map((row) => {
     const state = deriveSourceState(row.id);
     const gh = githubBindingForProject(row.id);
+    // V1.2 M1: server-authoritative display primary (explicit is_primary,
+    // MIN(id) fallback) — never a name- or id-ordered guess.
     const primaryLocal =
       (
         getDb()
           .prepare(
-            "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
+            `SELECT local_path FROM local_repositories
+             WHERE project_id = ?
+             ORDER BY is_primary DESC, id ASC
+             LIMIT 1`,
           )
           .get(row.id) as { local_path: string } | undefined
       )?.local_path ?? null;
@@ -236,6 +352,7 @@ export async function getProjectDetail(id: number): Promise<{
   project: ProjectListItemDto & {
     projectNote: string | null;
     snapshot: SnapshotDto | null;
+    localBindings: ProjectLocalBindingDto[];
     githubMetadata: GitHubMetadataDto | null;
     commits: Array<{ sha: string; shortSha: string; subject: string; authorName: string | null; committedAt: string | null; source: "local" | "github" }>;
   };
@@ -245,40 +362,148 @@ export async function getProjectDetail(id: number): Promise<{
   const gh = githubBindingForProject(id);
   const db = getDb();
 
-  let snapshot = null as SnapshotDto | null;
-  let localCommits: Array<{ sha: string; shortSha: string; subject: string; authorName: string | null; committedAt: string | null; source: "local" | "github" }> = [];
-  const primaryBinding = primaryLocalBindingId(id);
-  if (primaryBinding != null && state !== "GITHUB ONLY") {
-    const snapRow = db
+  // V1.2 M2 read model: EVERY local binding of the Project, display primary
+  // first. The ORDER BY (is_primary DESC, id ASC) IS the M1 effective-primary
+  // rule: explicit primary wins; with no explicit primary it degrades to
+  // MIN(id). Building this DTO spawns NO Git process — SQLite reads plus one
+  // cheap filesystem existence check per binding (inside
+  // deriveLocalBindingHealth).
+  const bindingRows = db
+    .prepare(
+      `SELECT id, is_primary, name, local_path, canonical_path, discovery_type,
+              source_id, last_scanned_at, last_health_state, last_health_checked_at
+       FROM local_repositories
+       WHERE project_id = ?
+       ORDER BY is_primary DESC, id ASC`,
+    )
+    .all(id) as Array<{
+    id: number;
+    is_primary: number;
+    name: string;
+    local_path: string;
+    canonical_path: string;
+    discovery_type: "scanned" | "manual";
+    source_id: number | null;
+    last_scanned_at: string | null;
+    last_health_state: string | null;
+    last_health_checked_at: string | null;
+  }>;
+
+  // Each binding carries its OWN latest snapshot. The pre-M2 Project Detail
+  // contract is authoritative here: captured_at DESC with id ONLY as the
+  // tie-breaker — a restored/out-of-order dataset can hold a higher snapshot
+  // id with an OLDER captured_at, so MAX(id) is NOT the same rule. Batched
+  // with ROW_NUMBER instead of the per-binding LIMIT 1 the old code ran.
+  const snapshotByBinding = new Map<number, SnapshotDto>();
+  if (bindingRows.length > 0) {
+    const ids = bindingRows.map((binding) => binding.id);
+    const snaps = db
       .prepare(
-        `SELECT branch, head_commit_sha, is_dirty, modified_count, staged_count,
+        `SELECT rid, branch, head_commit_sha, is_dirty, modified_count, staged_count,
                 untracked_count, upstream_ref, ahead_count, behind_count, captured_at
-         FROM repository_snapshots WHERE local_repository_id = ?
-         ORDER BY captured_at DESC, id DESC LIMIT 1`,
+         FROM (
+           SELECT s.local_repository_id AS rid, s.branch, s.head_commit_sha, s.is_dirty,
+                  s.modified_count, s.staged_count, s.untracked_count, s.upstream_ref,
+                  s.ahead_count, s.behind_count, s.captured_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY s.local_repository_id
+                    ORDER BY s.captured_at DESC, s.id DESC
+                  ) AS rn
+           FROM repository_snapshots s
+           WHERE s.local_repository_id IN (${ids.map(() => "?").join(",")})
+         ) ranked
+         WHERE rn = 1`,
       )
-      .get(primaryBinding) as Record<string, unknown> | undefined;
-    if (snapRow) {
-      snapshot = {
-        branch: snapRow.branch as string | null,
-        headCommitSha: snapRow.head_commit_sha as string | null,
-        isDirty: snapRow.is_dirty === 1,
-        modifiedCount: snapRow.modified_count as number,
-        stagedCount: snapRow.staged_count as number,
-        untrackedCount: snapRow.untracked_count as number,
-        upstreamRef: snapRow.upstream_ref as string | null,
-        aheadCount: snapRow.ahead_count as number | null,
-        behindCount: snapRow.behind_count as number | null,
-        capturedAt: snapRow.captured_at as string,
-      };
+      .all(...ids) as Array<{
+      rid: number;
+      branch: string | null;
+      head_commit_sha: string | null;
+      is_dirty: number;
+      modified_count: number;
+      staged_count: number;
+      untracked_count: number;
+      upstream_ref: string | null;
+      ahead_count: number | null;
+      behind_count: number | null;
+      captured_at: string;
+    }>;
+    for (const snap of snaps) {
+      snapshotByBinding.set(snap.rid, {
+        branch: snap.branch,
+        headCommitSha: snap.head_commit_sha,
+        isDirty: snap.is_dirty === 1,
+        modifiedCount: snap.modified_count,
+        stagedCount: snap.staged_count,
+        untrackedCount: snap.untracked_count,
+        upstreamRef: snap.upstream_ref,
+        aheadCount: snap.ahead_count,
+        behindCount: snap.behind_count,
+        capturedAt: snap.captured_at,
+      });
     }
-    const locals = db
+  }
+
+  // rows[0] is the effective display primary by construction of the ORDER BY.
+  const effectivePrimaryId = bindingRows[0]?.id ?? null;
+  const localBindings: ProjectLocalBindingDto[] = bindingRows.map((binding) => ({
+    id: binding.id,
+    isPrimary: binding.id === effectivePrimaryId,
+    name: binding.name,
+    localPath: binding.local_path,
+    canonicalPath: binding.canonical_path,
+    discoveryType: binding.discovery_type,
+    sourceId: binding.source_id,
+    lastScannedAt: binding.last_scanned_at,
+    snapshot: snapshotByBinding.get(binding.id) ?? null,
+    health: deriveLocalBindingHealth(binding),
+  }));
+
+  // M2-B: Project-level legacy fields keep describing ONLY the display
+  // primary. A non-primary dirty worktree or branch must never leak into
+  // these top-level values.
+  const snapshot =
+    effectivePrimaryId != null
+      ? snapshotByBinding.get(effectivePrimaryId) ?? null
+      : null;
+
+  // M2-C: local commit history reads across ALL local bindings of the
+  // Project, deduplicated at READ TIME on Project + lower(commit SHA). The
+  // same SHA observed in two local copies appears once; distinct SHAs from
+  // divergent copies both appear. Dedup happens BEFORE the 20-row display
+  // limit. The representative row is deterministic — effective
+  // display-primary observation first, then lowest binding id, then commit
+  // row id — never a repository name/order heuristic. Raw commits rows are
+  // never deleted or rewritten here.
+  let localCommits: Array<{ sha: string; shortSha: string; subject: string; authorName: string | null; committedAt: string | null; source: "local" | "github" }> = [];
+  if (bindingRows.length > 0) {
+    const unionRows = db
       .prepare(
-        `SELECT commit_sha AS sha, subject, author_name AS authorName, committed_at AS committedAt
-         FROM commits WHERE local_repository_id = ?
-         ORDER BY committed_at DESC, id DESC LIMIT 20`,
+        `SELECT sha, subject, authorName, committedAt FROM (
+           SELECT c.commit_sha AS sha,
+                  lower(c.commit_sha) AS lsha,
+                  c.subject AS subject,
+                  c.author_name AS authorName,
+                  c.committed_at AS committedAt,
+                  c.id AS rowId,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY lower(c.commit_sha)
+                    ORDER BY lr.is_primary DESC, lr.id ASC, c.id ASC
+                  ) AS rn
+           FROM commits c
+           JOIN local_repositories lr ON lr.id = c.local_repository_id
+           WHERE lr.project_id = ?
+         ) ranked
+         WHERE rn = 1
+         ORDER BY committedAt DESC, rowId DESC, lsha ASC
+         LIMIT 20`,
       )
-      .all(primaryBinding) as Array<{ sha: string; subject: string; authorName: string | null; committedAt: string | null }>;
-    localCommits = locals.map((row2) => ({
+      .all(id) as Array<{
+      sha: string;
+      subject: string;
+      authorName: string | null;
+      committedAt: string | null;
+    }>;
+    localCommits = unionRows.map((row2) => ({
       sha: row2.sha,
       shortSha: row2.sha.slice(0, 7),
       subject: row2.subject,
@@ -319,17 +544,14 @@ export async function getProjectDetail(id: number): Promise<{
       includeInPortfolio: row.include_in_portfolio === 1,
       portfolioOrder: row.portfolio_order,
       localPath:
-        (
-          db
-            .prepare(
-              "SELECT local_path FROM local_repositories WHERE project_id = ? ORDER BY id ASC LIMIT 1",
-            )
-            .get(row.id) as { local_path: string } | undefined
-        )?.local_path ?? null,
+        effectivePrimaryId != null
+          ? bindingRows.find((binding) => binding.id === effectivePrimaryId)?.local_path ?? null
+          : null,
       githubFullName: gh?.full_name ?? null,
       githubHtmlUrl: gh?.html_url ?? (gh ? `https://github.com/${gh.owner}/${gh.name}` : null),
       lastMeaningfulAt: lastMeaningfulAt(row.id),
       snapshot,
+      localBindings,
       githubMetadata: githubMetadataForProject(id),
       commits: [...localCommits, ...githubCommits],
     },
@@ -666,11 +888,13 @@ function deleteProjectCascade(projectId: number): void {
 
 /**
  * Project-scoped fingerprint. The second segment mirrors the legacy
- * repo-id namespace: the primary local binding when one exists (so
- * pre-V1.1 style identities stay stable), else the project itself.
+ * repo-id namespace: the FINGERPRINT ANCHOR binding (deterministic
+ * MIN(id), owner decision D1) when one exists — never the mutable
+ * display primary, so switching the primary cannot re-key history —
+ * else the project itself.
  */
 function projectScopedFingerprint(projectId: number, rest: string): string {
-  const scope = primaryLocalBindingId(projectId) ?? projectId;
+  const scope = fingerprintAnchorLocalBindingId(projectId) ?? projectId;
   return `p${projectId}:${scope}:${rest}`;
 }
 
