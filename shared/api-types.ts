@@ -481,3 +481,32 @@ export type ScanSummary = {
   repositoriesDiscovered: number;
   repositoriesRefreshed: number;
 };
+
+/** App-managed backup classification (filesystem-backed inventory). */
+export type BackupType = "MANUAL" | "MIGRATION" | "RESTORE_SAFETY";
+
+/** Read-only verification verdict from the M1 snapshot verifier. */
+export type BackupVerification = "VALID" | "INVALID";
+
+/** One recognized app-managed backup file in the live DB backups directory. */
+export type BackupDto = {
+  /** Opaque stable handle: the exact app-managed filename. */
+  id: string;
+  filename: string;
+  type: BackupType;
+  createdAt: string;
+  sizeBytes: number;
+  verification: BackupVerification;
+};
+
+export type ListBackupsResponse = {
+  backups: BackupDto[];
+};
+
+export type CreateBackupResponse = {
+  backup: BackupDto;
+};
+
+export type DeleteBackupResponse = {
+  ok: true;
+};

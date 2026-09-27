@@ -3,12 +3,15 @@ import type {
   AddLocalBindingResponse,
   ApiErrorBody,
   ContributionDayDto,
+  CreateBackupResponse,
   DailyDetailResponse,
   DashboardResponse,
+  DeleteBackupResponse,
   DeleteLocalBindingResponse,
   FolderSelectionResponse,
   GitHubStatusDto,
   HealthResponse,
+  ListBackupsResponse,
   PortfolioItemDto,
   ProjectDetailDto,
   ProjectListItemDto,
@@ -228,4 +231,12 @@ export const client = {
       `/api/github/tracked/${githubBindingId}/refresh`,
       { method: "POST" },
     ),
+  // --- V1.3 M2 application backups (Maintenance) ---
+  listBackups: () => api<ListBackupsResponse>("/api/backups"),
+  createBackup: () =>
+    api<CreateBackupResponse>("/api/backups", { method: "POST" }),
+  deleteBackup: (id: string) =>
+    api<DeleteBackupResponse>(`/api/backups/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 };

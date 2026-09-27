@@ -49,6 +49,11 @@ import {
   getDefaultScanDepth,
   setDefaultScanDepth,
 } from "./services/SettingsService.js";
+import {
+  createManualBackup,
+  deleteManualBackup,
+  listBackups,
+} from "./services/BackupService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -531,6 +536,33 @@ export function createApp(): express.Express {
           dataPath: config.dbPath,
         },
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M2 application backups: filesystem-backed inventory, manual create
+  // and MANUAL-only delete. Restore is intentionally absent (M3).
+  app.get("/api/backups", (_req, res, next) => {
+    try {
+      res.json({ backups: listBackups() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/backups", (_req, res, next) => {
+    try {
+      res.status(201).json({ backup: createManualBackup() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/api/backups/:id", (req, res, next) => {
+    try {
+      deleteManualBackup(req.params.id);
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }

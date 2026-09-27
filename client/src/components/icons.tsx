@@ -176,3 +176,16 @@ export function IconJournal(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconMaintenance(props: IconProps) {
+  return (
+    <Svg {...props}>
+      {/* stepped toolkit / maintenance mark */}
+      <rect x="1" y="2" width="10" height="2" />
+      <rect x="1" y="2" width="2" height="12" />
+      <rect x="1" y="12" width="10" height="2" />
+      <rect x="9" y="6" width="2" height="4" />
+      <rect x="11" y="5" width="4" height="6" />
+    </Svg>
+  );
+}

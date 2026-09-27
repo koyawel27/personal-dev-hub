@@ -8,6 +8,21 @@ export function formatDateTime(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
+/** Compact file size for backup rows and technical metadata. */
+export function formatBytes(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return "—";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = sizeBytes;
+  let unit = "B";
+  for (const next of units) {
+    if (value < 1024) break;
+    value /= 1024;
+    unit = next;
+  }
+  return `${value >= 10 || Number.isInteger(value) ? Math.round(value) : value.toFixed(1)} ${unit}`;
+}
+
 export function shortSha(sha: string | null | undefined): string {
   if (!sha) return "—";
   return sha.slice(0, 7);

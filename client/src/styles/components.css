@@ -2058,3 +2058,67 @@ button.cell:hover:not(:disabled) {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Application backups (V1.3 M2) ----------
+   Dense workbench rows matching the local-copies list language. */
+.backup-scope-note {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+.backup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.backup-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.backup-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.backup-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.backup-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-size: 12px;
+}
+
+.backup-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backup-actions button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.backup-keep-tag {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
