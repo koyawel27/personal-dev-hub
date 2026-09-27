@@ -8,3 +8,6 @@ fixtures/disposable-repo/
 
 # Hermes working artifacts (plans live with the session; the plan doc is preserved in git history)
 .hermes/
+
+# Local agent working artifacts
+.mimosa/
