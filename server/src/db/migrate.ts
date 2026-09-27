@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import {
+  createVerifiedSqliteSnapshot,
+  resolveMainDatabaseFile,
+} from "./backup.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,86 +41,6 @@ function recordApplied(database: DatabaseSync, name: string): void {
 }
 
 /**
- * Resolve the filesystem path of the connection's main database via
- * PRAGMA database_list. The live connection — not config.dbPath — is the
- * authoritative source for what gets backed up. An empty `file` column
- * (in-memory or otherwise non-file database) is not a backupable source
- * and fails loudly.
- */
-function mainDatabaseFile(database: DatabaseSync): string {
-  const rows = database.prepare("PRAGMA database_list").all() as Array<{
-    seq: number;
-    name: string;
-    file: string;
-  }>;
-  const main = rows.find((row) => row.name === "main");
-  if (!main || main.file.trim() === "") {
-    throw new Error(
-      "Cannot back up: the connection has no filesystem-backed main database.",
-    );
-  }
-  return main.file;
-}
-
-/**
- * Minimal verification that a freshly created rebuild backup is a complete,
- * readable SQLite database: file exists, non-empty, integrity_check = ok,
- * schema objects present. VACUUM INTO already guarantees a transactionally
- * consistent, page-valid copy, so full application validation is
- * intentionally not performed. The verification connection is always closed
- * and the backup is never mutated.
- */
-function verifyRebuildBackup(target: string): void {
-  if (!fs.existsSync(target)) {
-    throw new Error(
-      `Backup verification failed: backup file is missing: ${target}`,
-    );
-  }
-  if (fs.statSync(target).size === 0) {
-    throw new Error(
-      `Backup verification failed: backup file is empty: ${target}`,
-    );
-  }
-  let verifier: DatabaseSync | null = null;
-  try {
-    verifier = new DatabaseSync(target, { readOnly: true });
-    const integrity = verifier
-      .prepare("PRAGMA integrity_check")
-      .get() as { integrity_check: string };
-    if (integrity.integrity_check !== "ok") {
-      throw new Error(
-        `Backup verification failed: integrity_check reported "${integrity.integrity_check}".`,
-      );
-    }
-    const objects = verifier
-      .prepare("SELECT COUNT(*) AS n FROM sqlite_master")
-      .get() as { n: number };
-    if (objects.n === 0) {
-      throw new Error(
-        "Backup verification failed: backup contains no schema objects.",
-      );
-    }
-  } finally {
-    if (verifier) {
-      try {
-        verifier.close();
-      } catch {
-        // best effort
-      }
-    }
-  }
-}
-
-/** Best-effort removal so a partial/invalid file never masquerades as a backup. */
-function removeInvalidBackup(target: string): void {
-  try {
-    fs.rmSync(target, { force: true });
-  } catch {
-    // best effort; the caller rethrows the original failure
-  }
-}
-
-/**
  * Create a consistent snapshot backup before a rebuild migration and enforce
  * retention (owner decisions R1):
  * - the current attempt's backup is excluded from pruning,
@@ -126,17 +50,16 @@ function removeInvalidBackup(target: string): void {
  *   markBackupFailed) are exempt from pruning entirely and do not count
  *   toward ordinary retention.
  *
- * The snapshot is produced with `VACUUM INTO` on the live connection, so
- * committed state that still resides in the write-ahead log is included (a
- * plain file copy of the main database file is not). The backup is verified
- * before the migration continues; a failed or unverifiable backup aborts the
+ * The snapshot itself is the generic verified primitive (VACUUM INTO +
+ * verification). Naming, directory placement, retention, and failed-sidecar
+ * policy stay migration-specific. A failed or unverifiable backup aborts the
  * rebuild before any schema mutation.
  */
 function createRebuildBackup(
   database: DatabaseSync,
   migrationName: string,
 ): string {
-  const dbFile = mainDatabaseFile(database);
+  const dbFile = resolveMainDatabaseFile(database);
   if (!fs.existsSync(dbFile)) {
     throw new Error(`Cannot back up missing database file: ${dbFile}`);
   }
@@ -145,26 +68,11 @@ function createRebuildBackup(
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const target = path.join(backupDir, `pre-${migrationName}-${stamp}.sqlite`);
 
-  // A pre-existing destination would make VACUUM INTO fail — and the failure
-  // path below removes files created by THIS attempt. Collide loudly
-  // instead: a valid backup that predates this attempt must be preserved
-  // byte-for-byte, never verified, and never removed as this attempt's
-  // partial output.
-  if (fs.existsSync(target)) {
-    throw new Error(`Backup destination already exists: ${target}`);
-  }
-
-  try {
-    // Consistent snapshot: includes committed-but-uncheckpointed WAL state.
-    // VACUUM INTO must run outside any transaction; the rebuild protocol
-    // guarantees the backup happens before pre-flight, before FK changes,
-    // and before BEGIN IMMEDIATE.
-    database.prepare("VACUUM INTO ?").run(target);
-    verifyRebuildBackup(target);
-  } catch (err) {
-    removeInvalidBackup(target);
-    throw err;
-  }
+  // Generic verified snapshot: refuse collision, VACUUM INTO, verify,
+  // best-effort cleanup of THIS attempt's partial output on failure.
+  // The rebuild protocol guarantees the backup happens before pre-flight,
+  // before FK changes, and before BEGIN IMMEDIATE.
+  createVerifiedSqliteSnapshot(database, target);
 
   // Retention (owner decision R1): the current attempt's backup is excluded
   // from pruning. Among older same-migration backups, any backup carrying a
