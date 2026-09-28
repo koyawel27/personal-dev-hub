@@ -59,6 +59,7 @@ import {
   getRestoreState,
   scheduleRestore,
 } from "./services/RestoreService.js";
+import { listSourceHealth } from "./services/SourceHealthService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -596,6 +597,16 @@ export function createApp(): express.Express {
     try {
       clearRestoreState();
       res.json({ ok: true, restore: null });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M4 Source Health Center: read-only attention list. Never runs Git,
+  // never refreshes repositories, never mutates health or Activity.
+  app.get("/api/maintenance/source-health", (_req, res, next) => {
+    try {
+      res.json(listSourceHealth());
     } catch (err) {
       next(err);
     }

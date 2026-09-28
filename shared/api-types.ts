@@ -535,3 +535,27 @@ export type ScheduleRestoreRequest = {
 export type ScheduleRestoreResponse = {
   restore: RestoreStateDto;
 };
+
+/**
+ * V1.3 M4 Maintenance source-health attention item.
+ * Health is derived at read time (filesystem existence + cached Git verdict).
+ * This endpoint never runs Git and never mutates health/Activity.
+ */
+export type SourceHealthItemDto = {
+  projectId: number;
+  projectName: string;
+  bindingId: number;
+  bindingName: string;
+  localPath: string;
+  isPrimary: boolean;
+  health: LocalBindingHealthDto;
+};
+
+export type SourceHealthResponse = {
+  totalLocalBindings: number;
+  attentionCount: number;
+  pathMissingCount: number;
+  notGitRepoCount: number;
+  unscannedCount: number;
+  items: SourceHealthItemDto[];
+};

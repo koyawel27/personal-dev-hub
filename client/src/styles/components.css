@@ -2150,3 +2150,37 @@ button.cell:hover:not(:disabled) {
 .restore-detail .mono {
   font-size: 11px;
 }
+
+/* ---------- Source Health Center (V1.3 M4) ---------- */
+.source-health-summary {
+  margin: 0 0 6px;
+}
+
+.source-health-counts {
+  margin-bottom: 12px;
+}
+
+.source-health-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.source-health-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.source-health-project {
+  font-weight: 600;
+}
+
+.source-health-row .backup-actions button {
+  padding: 3px 10px;
+  font-size: 12px;
+}

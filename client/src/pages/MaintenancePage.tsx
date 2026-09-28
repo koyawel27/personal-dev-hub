@@ -7,6 +7,7 @@ import type {
 import { ApiError, client } from "../api";
 import { Badge } from "../components/Badge";
 import { EmptyState } from "../components/EmptyState";
+import { SourceHealthPanel } from "../components/SourceHealthPanel";
 import { formatBytes, formatDateTime, relativeTime } from "../format";
 
 /**
@@ -332,6 +333,8 @@ export function MaintenancePage() {
           restart, and never changes tracked Git repositories.
         </p>
       </section>
+
+      <SourceHealthPanel />
     </div>
   );
 }

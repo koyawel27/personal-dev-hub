@@ -21,6 +21,7 @@ import type {
   RestoreStateResponse,
   ScheduleRestoreResponse,
   SetPrimaryLocalBindingResponse,
+  SourceHealthResponse,
   ScanSummary,
   SourceDto,
   PickerEntryDto,
@@ -253,4 +254,7 @@ export const client = {
     ),
   clearRestoreState: () =>
     api<{ ok: true; restore: null }>("/api/restore", { method: "DELETE" }),
+  // --- V1.3 M4 Maintenance source health (read-only attention list) ---
+  sourceHealth: () =>
+    api<SourceHealthResponse>("/api/maintenance/source-health"),
 };
