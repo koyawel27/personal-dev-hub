@@ -18,26 +18,30 @@ import { getDb, openDatabase } from "../db/client.js";
 import { AppError, ErrorCodes } from "../lib/errors.js";
 
 /**
- * Restart-mediated restore (V1.3 M3).
+ * Restart-mediated restore (V1.3 M3 / M5-B1 crash-safe attempt journal).
  *
- * The running app only SCHEDULES a restore into a filesystem-backed
+ * The running app only SCHEDULES a restore into filesystem-backed
  * restore-state.json. Actual replacement happens in processPendingRestore()
  * at startup, BEFORE getDb() opens the application database.
  *
  * Safety rules:
  * - never replace the live DB from an HTTP request
  * - never accept an arbitrary restore source path from the client
- * - always create a verified pre-restore safety snapshot before mutation
- * - stage + verify before swap
- * - rollback uses ONLY the verified pre-restore snapshot (VACUUM INTO), which
- *   is the sole artifact guaranteed to include committed WAL state
- * - .restore-old-* hold is forensic/emergency material only — never an
- *   automated recovery source (SQLite-valid != complete logical state)
- * - tracked Git repositories are never touched
+ * - persist an attempt journal (pre-restore id + stage/hold basenames) BEFORE
+ *   any destructive filesystem mutation
+ * - rollback / interrupted recovery use ONLY the verified pre-restore snapshot
+ *   (VACUUM INTO) — the sole artifact that includes committed WAL state
+ * - .restore-old-* hold is forensic material only — never automated recovery
+ * - unproven recovery persists startupBlocked and blocks EVERY later startup
+ * - malformed restore-state.json at startup fails closed (no silent empty DB)
  */
 
 export const RESTORE_STATE_FILENAME = "restore-state.json";
-const RESTORE_STATE_VERSION = 1 as const;
+const RESTORE_STATE_VERSION = 2 as const;
+
+const ATTEMPT_ID_RE = /^[A-Za-z0-9-]{8,80}$/;
+const STAGE_FILENAME_RE = /^\.restore-stage-[A-Za-z0-9-]{8,80}\.sqlite$/;
+const HOLD_FILENAME_RE = /^\.restore-old-[A-Za-z0-9-]{8,80}\.sqlite$/;
 
 type RestoreStateRecord = {
   version: typeof RESTORE_STATE_VERSION;
@@ -47,14 +51,26 @@ type RestoreStateRecord = {
   completedAt: string | null;
   preRestoreBackupId: string | null;
   message: string | null;
+  /** Internal attempt identity (not part of the public DTO). */
+  attemptId: string | null;
+  /** Internal stage basename in the database directory. */
+  stageFilename: string | null;
+  /** Internal hold basename in the database directory. */
+  holdFilename: string | null;
+  /** When true, every later startup must refuse to continue. */
+  startupBlocked: boolean;
 };
+
+type ReadStateResult =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | { kind: "ok"; record: RestoreStateRecord };
 
 /** Optional collaborators for deterministic failure tests (not a test mode). */
 export type RestoreProcessorDeps = {
   verifyBackup: (target: string) => void;
   createSnapshot: (sourceDbPath: string, target: string) => void;
   validateInstalled: (dbFile: string) => void;
-  /** Called after the staged candidate is in place, before post-install checks. */
   afterSwap?: (ctx: {
     dbFile: string;
     safetyPath: string | null;
@@ -81,7 +97,6 @@ const defaultDeps: RestoreProcessorDeps = {
   },
   validateInstalled: (dbFile) => {
     verifySqliteBackup(dbFile);
-    // Normal application open path: applies migrations to older backups.
     const db = openDatabase(dbFile);
     try {
       const fkIssues = db.prepare("PRAGMA foreign_key_check").all() as unknown[];
@@ -129,7 +144,6 @@ function liveMainDbFile(): string {
   return main.file;
 }
 
-/** Live-DB restore state path (M2/M3 request-time operations). */
 function liveRestoreStatePath(): string {
   try {
     return restoreStatePathForDbFile(liveMainDbFile());
@@ -160,10 +174,24 @@ function isShortMessage(value: unknown): value is string | null {
   return typeof value === "string" && value.length <= 200;
 }
 
-/**
- * Validate a restore-state object read from disk.
- * Malformed state is treated as absent — never as a path to follow.
- */
+function isSafeArtifactName(value: unknown, re: RegExp): value is string {
+  return typeof value === "string" && re.test(value);
+}
+
+/** Resolve an internal artifact basename strictly inside the database directory. */
+function resolveArtifactInDbDir(dbFile: string, filename: string): string {
+  const dir = path.resolve(path.dirname(dbFile));
+  const target = path.resolve(dir, filename);
+  const prefix = dir.endsWith(path.sep) ? dir : dir + path.sep;
+  if (!target.startsWith(prefix)) {
+    throw new AppError(
+      ErrorCodes.RESTORE_STATE_INVALID,
+      "Restore attempt artifact is outside the application data directory.",
+    );
+  }
+  return target;
+}
+
 function parseRestoreState(raw: unknown): RestoreStateRecord | null {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
@@ -175,10 +203,22 @@ function parseRestoreState(raw: unknown): RestoreStateRecord | null {
   if (!isSafeBackupId(obj.backupId)) return null;
   if (!isIsoLike(obj.requestedAt)) return null;
   if (obj.completedAt != null && !isIsoLike(obj.completedAt)) return null;
-  if (obj.preRestoreBackupId != null) {
-    if (!isSafeBackupId(obj.preRestoreBackupId)) return null;
+  if (obj.preRestoreBackupId != null && !isSafeBackupId(obj.preRestoreBackupId)) {
+    return null;
   }
   if (!isShortMessage(obj.message)) return null;
+  if (obj.startupBlocked != null && typeof obj.startupBlocked !== "boolean") {
+    return null;
+  }
+  if (obj.attemptId != null && !isSafeArtifactName(obj.attemptId, ATTEMPT_ID_RE)) {
+    return null;
+  }
+  if (obj.stageFilename != null && !isSafeArtifactName(obj.stageFilename, STAGE_FILENAME_RE)) {
+    return null;
+  }
+  if (obj.holdFilename != null && !isSafeArtifactName(obj.holdFilename, HOLD_FILENAME_RE)) {
+    return null;
+  }
 
   return {
     version: RESTORE_STATE_VERSION,
@@ -189,10 +229,17 @@ function parseRestoreState(raw: unknown): RestoreStateRecord | null {
     preRestoreBackupId:
       obj.preRestoreBackupId == null ? null : (obj.preRestoreBackupId as string),
     message: obj.message == null ? null : (obj.message as string),
+    attemptId: obj.attemptId == null ? null : (obj.attemptId as string),
+    stageFilename: obj.stageFilename == null ? null : (obj.stageFilename as string),
+    holdFilename: obj.holdFilename == null ? null : (obj.holdFilename as string),
+    startupBlocked: obj.startupBlocked === true,
   };
 }
 
-function writeRestoreStateAtomically(statePath: string, record: RestoreStateRecord): void {
+function writeRestoreStateAtomically(
+  statePath: string,
+  record: RestoreStateRecord,
+): void {
   const dir = path.dirname(statePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${RESTORE_STATE_FILENAME}.tmp`);
@@ -201,15 +248,22 @@ function writeRestoreStateAtomically(statePath: string, record: RestoreStateReco
   fs.renameSync(tmp, statePath);
 }
 
-export function readRestoreState(statePath: string): RestoreStateRecord | null {
-  if (!fs.existsSync(statePath)) return null;
+/** Distinguish absent / malformed / valid. Never invent a record. */
+export function readRestoreStateResult(statePath: string): ReadStateResult {
+  if (!fs.existsSync(statePath)) return { kind: "absent" };
   try {
     const raw: unknown = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    return parseRestoreState(raw);
+    const record = parseRestoreState(raw);
+    if (!record) return { kind: "invalid" };
+    return { kind: "ok", record };
   } catch {
-    // Malformed state must not drive filesystem access or DB mutation.
-    return null;
+    return { kind: "invalid" };
   }
+}
+
+export function readRestoreState(statePath: string): RestoreStateRecord | null {
+  const result = readRestoreStateResult(statePath);
+  return result.kind === "ok" ? result.record : null;
 }
 
 function toDto(record: RestoreStateRecord): RestoreStateDto {
@@ -237,10 +291,44 @@ function removeWalShm(dbFile: string): void {
   safeUnlink(`${dbFile}-shm`);
 }
 
+function newAttemptId(): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `a${Date.now().toString(36)}-${process.pid}-${rand}`;
+}
+
+function emptyRecord(
+  status: RestoreStatus,
+  backupId: string,
+  requestedAt: string,
+): RestoreStateRecord {
+  return {
+    version: RESTORE_STATE_VERSION,
+    status,
+    backupId,
+    requestedAt,
+    completedAt: null,
+    preRestoreBackupId: null,
+    message: null,
+    attemptId: null,
+    stageFilename: null,
+    holdFilename: null,
+    startupBlocked: false,
+  };
+}
+
 /** Current restore state for the live application database (or null). */
 export function getRestoreState(): RestoreStateDto | null {
-  const record = readRestoreState(liveRestoreStatePath());
-  return record ? toDto(record) : null;
+  const statePath = liveRestoreStatePath();
+  const result = readRestoreStateResult(statePath);
+  if (result.kind === "absent") return null;
+  if (result.kind === "invalid") {
+    throw new AppError(
+      ErrorCodes.RESTORE_STATE_INVALID,
+      "Restore state file is malformed and must be repaired or removed.",
+      500,
+    );
+  }
+  return toDto(result.record);
 }
 
 /**
@@ -273,8 +361,15 @@ export function scheduleRestore(id: unknown, body: unknown): RestoreStateDto {
   }
 
   const statePath = liveRestoreStatePath();
-  const existing = readRestoreState(statePath);
-  if (existing && existing.status === "PENDING") {
+  const existingResult = readRestoreStateResult(statePath);
+  if (existingResult.kind === "invalid") {
+    throw new AppError(
+      ErrorCodes.RESTORE_STATE_INVALID,
+      "Restore state file is malformed and must be repaired or removed.",
+      500,
+    );
+  }
+  if (existingResult.kind === "ok" && existingResult.record.status === "PENDING") {
     throw new AppError(
       ErrorCodes.RESTORE_ALREADY_PENDING,
       "A restore is already scheduled. Cancel it before scheduling another.",
@@ -282,16 +377,10 @@ export function scheduleRestore(id: unknown, body: unknown): RestoreStateDto {
     );
   }
 
-  // Resolve strictly under the LIVE database's backups directory.
   const backupDir = backupDirForDbFile(liveMainDbFile());
-
   const selected = resolveInsideBackupDir(backupDir, id);
   if (!fs.existsSync(selected)) {
-    throw new AppError(
-      ErrorCodes.RESTORE_NOT_FOUND,
-      "Backup was not found.",
-      404,
-    );
+    throw new AppError(ErrorCodes.RESTORE_NOT_FOUND, "Backup was not found.", 404);
   }
   if (classifyBackupFilename(id) == null) {
     throw new AppError(
@@ -310,22 +399,14 @@ export function scheduleRestore(id: unknown, body: unknown): RestoreStateDto {
     );
   }
 
-  const record: RestoreStateRecord = {
-    version: RESTORE_STATE_VERSION,
-    status: "PENDING",
-    backupId: id,
-    requestedAt: nowIso(),
-    completedAt: null,
-    preRestoreBackupId: null,
-    message: null,
-  };
+  const record = emptyRecord("PENDING", id, nowIso());
   writeRestoreStateAtomically(statePath, record);
   return toDto(record);
 }
 
 /**
  * Cancel a PENDING restore, or dismiss a terminal SUCCEEDED/FAILED result.
- * Idempotent when no state exists.
+ * Also the manual intervention path for malformed or startup-blocked state.
  */
 export function clearRestoreState(): void {
   const statePath = liveRestoreStatePath();
@@ -334,17 +415,12 @@ export function clearRestoreState(): void {
 }
 
 export type ProcessPendingRestoreOptions = {
-  /** Configured database file (startup has no live connection yet). */
   dbPath?: string;
-  /** Injectable seams for deterministic failure tests. */
   deps?: Partial<RestoreProcessorDeps>;
 };
 
 /**
  * Startup restore processor. MUST run before getDb() opens the application DB.
- *
- * No PENDING state → no-op.
- * Terminal state → never re-executes.
  */
 export function processPendingRestore(
   options: ProcessPendingRestoreOptions = {},
@@ -353,16 +429,119 @@ export function processPendingRestore(
   const statePath = restoreStatePathForDbFile(dbFile);
   const deps: RestoreProcessorDeps = { ...defaultDeps, ...options.deps };
 
-  const state = readRestoreState(statePath);
-  if (state == null || state.status !== "PENDING") {
+  const read = readRestoreStateResult(statePath);
+
+  // Fail closed: a present-but-malformed recovery journal must never become
+  // a silent empty application database.
+  if (read.kind === "invalid") {
+    throw new AppError(
+      ErrorCodes.RESTORE_STATE_INVALID,
+      "Restore state file exists but is malformed. Startup refused. " +
+        "Repair or remove restore-state.json after manual investigation.",
+    );
+  }
+  if (read.kind === "absent") return;
+
+  const state = read.record;
+
+  // Persistent startup block from an earlier unproven recovery.
+  if (state.status === "FAILED" && state.startupBlocked) {
+    throw new AppError(
+      ErrorCodes.RESTORE_FAILED,
+      "Startup remains blocked: a previous restore recovery could not be verified. " +
+        "Preserved recovery artifacts require manual investigation. " +
+        "Clear restore-state.json only after the application database is confirmed safe.",
+    );
+  }
+
+  if (state.status !== "PENDING") return;
+
+  // Interrupted prior attempt: journal already has authoritative recovery info.
+  if (state.preRestoreBackupId != null) {
+    recoverInterruptedAttempt(dbFile, statePath, state, deps);
     return;
   }
 
-  let preRestoreBackupId: string | null = state.preRestoreBackupId;
+  // Fresh scheduled attempt: journal BEFORE any destructive mutation.
+  runFreshAttempt(dbFile, statePath, state, deps);
+}
+
+function recoverInterruptedAttempt(
+  dbFile: string,
+  statePath: string,
+  state: RestoreStateRecord,
+  deps: RestoreProcessorDeps,
+): void {
+  const backupDir = backupDirForDbFile(dbFile);
+  const safetyPath = path.join(backupDir, state.preRestoreBackupId!);
+  const stagePath =
+    state.stageFilename != null
+      ? resolveArtifactInDbDir(dbFile, state.stageFilename)
+      : null;
+  const holdPath =
+    state.holdFilename != null
+      ? resolveArtifactInDbDir(dbFile, state.holdFilename)
+      : null;
+
+  const recovered =
+    fs.existsSync(safetyPath) &&
+    (() => {
+      try {
+        deps.verifyBackup(safetyPath);
+        return rollbackFromPreRestoreSnapshot(dbFile, safetyPath);
+      } catch {
+        return false;
+      }
+    })();
+
+  if (recovered) {
+    writeRestoreStateAtomically(statePath, {
+      ...state,
+      status: "FAILED",
+      completedAt: nowIso(),
+      startupBlocked: false,
+      message:
+        "Restore was interrupted; previous application state recovered from the pre-restore snapshot.",
+    });
+    // Proven recovery: clean this attempt's swap artifacts only.
+    safeUnlink(stagePath);
+    safeUnlink(holdPath);
+    return;
+  }
+
+  // Hold must NEVER convert this into success. Preserve artifacts; block startup.
+  writeRestoreStateAtomically(statePath, {
+    ...state,
+    status: "FAILED",
+    completedAt: nowIso(),
+    startupBlocked: true,
+    message:
+      "Restore was interrupted and the pre-restore snapshot could not be verified as recovered. Startup refused.",
+  });
+  throw new AppError(
+    ErrorCodes.RESTORE_FAILED,
+    "Interrupted restore could not recover previous application state from the " +
+      "verified pre-restore snapshot. Startup aborted. Recovery artifacts were preserved " +
+      "for manual investigation.",
+  );
+}
+
+function runFreshAttempt(
+  dbFile: string,
+  statePath: string,
+  state: RestoreStateRecord,
+  deps: RestoreProcessorDeps,
+): void {
+  const backupDir = backupDirForDbFile(dbFile);
+  let preRestoreBackupId: string | null = null;
+  let attemptId: string | null = null;
+  let stageFilename: string | null = null;
+  let holdFilename: string | null = null;
   let safetyPath: string | null = null;
   let stagePath: string | null = null;
   let holdPath: string | null = null;
   let replacementStarted = false;
+  let journalPersisted = false;
 
   try {
     // ---- PHASE A: validate without mutating the current DB -----------------
@@ -372,13 +551,9 @@ export function processPendingRestore(
         "Scheduled backup id is not an app-managed backup filename.",
       );
     }
-    const backupDir = backupDirForDbFile(dbFile);
     const selectedPath = resolveInsideBackupDir(backupDir, state.backupId);
     if (!fs.existsSync(selectedPath)) {
-      throw new AppError(
-        ErrorCodes.RESTORE_NOT_FOUND,
-        "Scheduled backup is missing.",
-      );
+      throw new AppError(ErrorCodes.RESTORE_NOT_FOUND, "Scheduled backup is missing.");
     }
     if (classifyBackupFilename(state.backupId) == null) {
       throw new AppError(
@@ -395,7 +570,6 @@ export function processPendingRestore(
     }
 
     // ---- PHASE B: verified safety snapshot of CURRENT state ---------------
-    // Raw open — do NOT run migrations merely to snapshot.
     fs.mkdirSync(backupDir, { recursive: true });
     const safetyTarget = uniqueRestoreSafetyTarget(backupDir, (p) =>
       fs.existsSync(p),
@@ -404,114 +578,148 @@ export function processPendingRestore(
     safetyPath = safetyTarget;
     preRestoreBackupId = path.basename(safetyTarget);
 
-    // ---- STAGED CANDIDATE (never copy selected → live path directly) ------
-    const stamp = preRestoreBackupId.replace(/^pre-restore-/, "").replace(/\.sqlite$/, "");
-    stagePath = path.join(
-      path.dirname(dbFile),
-      `.restore-stage-${stamp}-${process.pid}.sqlite`,
-    );
+    // ---- JOURNAL (before any destructive filesystem mutation) -------------
+    attemptId = newAttemptId();
+    stageFilename = `.restore-stage-${attemptId}.sqlite`;
+    holdFilename = `.restore-old-${attemptId}.sqlite`;
+    stagePath = resolveArtifactInDbDir(dbFile, stageFilename);
+    holdPath = resolveArtifactInDbDir(dbFile, holdFilename);
+
+    writeRestoreStateAtomically(statePath, {
+      ...state,
+      preRestoreBackupId,
+      attemptId,
+      stageFilename,
+      holdFilename,
+      startupBlocked: false,
+    });
+    journalPersisted = true;
+
+    // ---- STAGED CANDIDATE -------------------------------------------------
     safeUnlink(stagePath);
     fs.copyFileSync(selectedPath, stagePath);
     deps.verifyBackup(stagePath);
 
     // ---- SWAP -------------------------------------------------------------
-    // Safety snapshot is verified: only now may stale WAL/SHM be cleared.
     replacementStarted = true;
     removeWalShm(dbFile);
-
-    holdPath = path.join(
-      path.dirname(dbFile),
-      `.restore-old-${stamp}-${process.pid}.sqlite`,
-    );
-    // Hold is a swap/forensic artifact only. Automated rollback NEVER uses it
-    // (it can omit committed WAL state). The pre-restore snapshot is authoritative.
     safeUnlink(holdPath);
     if (fs.existsSync(dbFile)) {
       fs.renameSync(dbFile, holdPath);
     }
     fs.copyFileSync(stagePath, dbFile);
     safeUnlink(stagePath);
-    stagePath = null;
 
-    deps.afterSwap?.({
-      dbFile,
-      safetyPath,
-      holdPath,
-      stagePath: null,
-    });
+    deps.afterSwap?.({ dbFile, safetyPath, holdPath, stagePath: null });
 
     // ---- POST-INSTALL VALIDATION -----------------------------------------
     deps.validateInstalled(dbFile);
 
     // ---- SUCCESS ----------------------------------------------------------
     writeRestoreStateAtomically(statePath, {
-      version: RESTORE_STATE_VERSION,
+      ...state,
       status: "SUCCEEDED",
-      backupId: state.backupId,
-      requestedAt: state.requestedAt,
       completedAt: nowIso(),
       preRestoreBackupId,
+      attemptId,
+      stageFilename,
+      holdFilename,
+      startupBlocked: false,
       message: null,
     });
-    // Success: hold is no longer needed as swap residue (safety snapshot is kept).
     safeUnlink(holdPath);
-    holdPath = null;
   } catch (err) {
     const failureMessage = restrainMessage(err);
 
     if (replacementStarted) {
       const recovered = rollbackFromPreRestoreSnapshot(dbFile, safetyPath);
       if (!recovered) {
-        // The pre-restore snapshot is the ONLY authoritative recovery source.
-        // A .restore-old-* hold (even if SQLite-valid) must NEVER be treated
-        // as safe recovery — it can omit committed WAL state. Preserve all
-        // recovery artifacts and refuse startup.
         writeRestoreStateAtomically(statePath, {
-          version: RESTORE_STATE_VERSION,
+          ...state,
           status: "FAILED",
-          backupId: state.backupId,
-          requestedAt: state.requestedAt,
           completedAt: nowIso(),
           preRestoreBackupId,
+          attemptId,
+          stageFilename,
+          holdFilename,
+          startupBlocked: true,
           message:
             "Restore failed and the pre-restore snapshot could not be verified as recovered. Startup refused.",
         });
-        throw new Error(
+        throw new AppError(
+          ErrorCodes.RESTORE_FAILED,
           "Restore failed and rollback from the verified pre-restore snapshot " +
             "could not be completed and verified. Startup aborted. " +
-            "The pre-restore snapshot, selected backup, and swap hold were preserved " +
-            "for manual investigation.",
+            "Recovery artifacts were preserved for manual investigation.",
         );
       }
+      // Proven in-process rollback: safe to start; clean this attempt's swap artifacts.
+      writeRestoreStateAtomically(statePath, {
+        ...state,
+        status: "FAILED",
+        completedAt: nowIso(),
+        preRestoreBackupId,
+        attemptId,
+        stageFilename,
+        holdFilename,
+        startupBlocked: false,
+        message: failureMessage,
+      });
+      safeUnlink(stagePath);
+      safeUnlink(holdPath);
+      return;
     }
 
+    // No live-DB replacement in this process — but that is NOT sufficient
+    // proof that startup is safe. The current DB must still exist and pass
+    // independent real verification (missing/unusable DB must block forever).
+    const currentDbSafe = isCurrentDbSafeToStart(dbFile);
     writeRestoreStateAtomically(statePath, {
-      version: RESTORE_STATE_VERSION,
+      ...state,
       status: "FAILED",
-      backupId: state.backupId,
-      requestedAt: state.requestedAt,
       completedAt: nowIso(),
-      preRestoreBackupId,
-      message: failureMessage,
+      preRestoreBackupId: journalPersisted ? preRestoreBackupId : null,
+      attemptId: journalPersisted ? attemptId : null,
+      stageFilename: journalPersisted ? stageFilename : null,
+      holdFilename: journalPersisted ? holdFilename : null,
+      startupBlocked: !currentDbSafe,
+      message: currentDbSafe
+        ? failureMessage
+        : "Restore failed before swap and the current application database could not be proven safe. Startup refused.",
     });
-    // Recoverable failure: allow normal startup to continue on current DB.
-  } finally {
     safeUnlink(stagePath);
+    safeUnlink(holdPath);
+    if (!currentDbSafe) {
+      throw new AppError(
+        ErrorCodes.RESTORE_FAILED,
+        "Restore failed before swap and the current application database is missing " +
+          "or could not be verified as safe. Startup aborted. " +
+          "Clear restore-state.json only after the application database is confirmed safe.",
+      );
+    }
   }
 }
 
 /**
- * Recover previous logical state from the verified pre-restore snapshot.
- *
- * AUTHORITATIVE SOURCE ONLY: the pre-restore snapshot (VACUUM INTO) is the
- * sole artifact guaranteed to contain complete committed state, including
- * data that resided in WAL. The .restore-old-* hold is a swap/forensic
- * artifact and is NEVER accepted as automated recovery — it may open and
- * pass integrity_check while still missing committed WAL pages
- * (SQLite-valid != proven restoration of previous logical state).
- *
- * Returns true only when the snapshot is installed and verified with the
- * REAL M1 verifier — never with injectable test seams.
+ * Prove the current live database is safe to hand to normal application
+ * startup after a pre-swap restore failure. Uses the REAL M1 verifier only
+ * (never injectable seams): exists, non-empty, read-only open,
+ * integrity_check == ok, schema objects present. Does not run migrations,
+ * does not clear WAL/SHM, and never creates a replacement database.
+ */
+function isCurrentDbSafeToStart(dbFile: string): boolean {
+  try {
+    if (!fs.existsSync(dbFile)) return false;
+    verifySqliteBackup(dbFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Recover previous logical state from the verified pre-restore snapshot ONLY.
+ * The .restore-old-* hold is never accepted as automated recovery.
  */
 function rollbackFromPreRestoreSnapshot(
   dbFile: string,
@@ -522,15 +730,11 @@ function rollbackFromPreRestoreSnapshot(
   }
 
   try {
-    // Clear candidate WAL/SHM so they cannot contaminate the recovered DB.
     safeUnlink(`${dbFile}-wal`);
     safeUnlink(`${dbFile}-shm`);
     safeUnlink(dbFile);
-
-    // Install the verified pre-restore snapshot as the live DB.
     fs.copyFileSync(safetyPath, dbFile);
 
-    // Recovery must be proven with the real verifier, not a stub.
     verifySqliteBackup(dbFile);
     const check = new DatabaseSync(dbFile, { readOnly: true });
     try {

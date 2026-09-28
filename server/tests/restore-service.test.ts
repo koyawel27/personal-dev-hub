@@ -228,13 +228,17 @@ describe("RestoreService scheduling (V1.3 M3)", () => {
     fs.writeFileSync(
       statePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         status: "FAILED",
         backupId: "manual-2026-03-04T05-06-07-890Z.sqlite",
         requestedAt: "2026-03-04T05:06:07.890Z",
         completedAt: "2026-03-04T05:06:08.000Z",
         preRestoreBackupId: null,
         message: "x",
+        attemptId: null,
+        stageFilename: null,
+        holdFilename: null,
+        startupBlocked: false,
       }),
     );
     expect(getRestoreState()?.status).toBe("FAILED");
@@ -242,25 +246,29 @@ describe("RestoreService scheduling (V1.3 M3)", () => {
     expect(getRestoreState()).toBeNull();
   });
 
-  it("malformed restore state is ignored and cannot cause path access", () => {
+  it("malformed restore state fails closed at startup and cannot cause path access", () => {
     fs.writeFileSync(statePath(), "{ not json");
     expect(readRestoreState(statePath())).toBeNull();
-    expect(() => processPendingRestore()).not.toThrow();
+    expect(() => processPendingRestore()).toThrow(/malformed|state/i);
 
     fs.writeFileSync(
       statePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         status: "PENDING",
         backupId: "../../../etc/passwd",
         requestedAt: "2026-03-04T05:06:07.890Z",
         completedAt: null,
         preRestoreBackupId: null,
         message: null,
+        attemptId: null,
+        stageFilename: null,
+        holdFilename: null,
+        startupBlocked: false,
       }),
     );
     expect(readRestoreState(statePath())).toBeNull();
-    expect(() => processPendingRestore()).not.toThrow();
+    expect(() => processPendingRestore()).toThrow(/malformed|state/i);
     expect(readLiveMarker()).not.toBe("hacked");
   });
 });
@@ -274,13 +282,17 @@ describe("RestoreService startup success (V1.3 M3)", () => {
     fs.writeFileSync(
       statePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         status: "SUCCEEDED",
         backupId: "manual-2026-03-04T05-06-07-890Z.sqlite",
         requestedAt: "2026-03-04T05:06:07.890Z",
         completedAt: "2026-03-04T05:06:08.000Z",
         preRestoreBackupId: "pre-restore-2026-03-04T05-06-08-000Z.sqlite",
         message: null,
+        attemptId: null,
+        stageFilename: null,
+        holdFilename: null,
+        startupBlocked: false,
       }),
     );
     expect(() => processPendingRestore()).not.toThrow();
@@ -439,6 +451,8 @@ describe("RestoreService failure / rollback (V1.3 M3)", () => {
 
     const state = readRestoreState(statePath());
     expect(state?.status).toBe("FAILED");
+    // Healthy current DB independently proven safe → not blocked.
+    expect(state?.startupBlocked).toBe(false);
     expect(readLiveMarker()).toBe("stay-put");
   });
 
@@ -527,6 +541,7 @@ describe("RestoreService failure / rollback (V1.3 M3)", () => {
 
     const state = readRestoreState(statePath());
     expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(true);
     // Must never claim safe recovery.
     expect(state?.message).not.toMatch(/recovered successfully|safely recovered/i);
     expect(state?.message).toMatch(/pre-restore snapshot/i);
@@ -576,6 +591,7 @@ describe("RestoreService failure / rollback (V1.3 M3)", () => {
     const state = readRestoreState(statePath());
     expect(state?.status).toBe("FAILED");
     expect(state?.message).toMatch(/pre-restore snapshot/i);
+    expect(state?.startupBlocked).toBe(true);
     // Never: "previous application data was safely recovered."
     expect(state?.message).not.toMatch(/safely recovered|recovered successfully/i);
 
@@ -585,5 +601,451 @@ describe("RestoreService failure / rollback (V1.3 M3)", () => {
       fs.readdirSync(dir).some((f) => f.startsWith(".restore-old-")),
     ).toBe(true);
     expect(state?.preRestoreBackupId).toMatch(/^pre-restore-/);
+  });
+});
+
+describe("RestoreService M5-B1 crash-safe attempt journal", () => {
+  const ATTEMPT = "attempt0001";
+  const STAGE = `.restore-stage-${ATTEMPT}.sqlite`;
+  const HOLD = `.restore-old-${ATTEMPT}.sqlite`;
+  const SELECTED = "manual-2026-03-04T05-06-07-890Z.sqlite";
+
+  function writeInterruptedPending(preRestoreBackupId: string): void {
+    fs.writeFileSync(
+      statePath(),
+      JSON.stringify(
+        {
+          version: 2,
+          status: "PENDING",
+          backupId: SELECTED,
+          requestedAt: "2026-03-04T05:06:07.890Z",
+          completedAt: null,
+          preRestoreBackupId,
+          message: null,
+          attemptId: ATTEMPT,
+          stageFilename: STAGE,
+          holdFilename: HOLD,
+          startupBlocked: false,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  function makeSafetySnapshot(note: string): string {
+    // Build a verified pre-restore snapshot containing `note` marker data.
+    const dir = backupsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const id = `pre-restore-2026-03-04T09-00-00-000Z.sqlite`;
+    const target = path.join(dir, id);
+    const tmp = path.join(dir, "safety-src.sqlite");
+    const db = new DatabaseSync(tmp);
+    try {
+      db.exec(`
+        CREATE TABLE schema_migrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT UNIQUE NOT NULL,
+          applied_at TEXT NOT NULL
+        );
+        CREATE TABLE marker_rows (id INTEGER PRIMARY KEY, note TEXT NOT NULL);
+      `);
+      db.prepare("INSERT INTO marker_rows (note) VALUES (?)").run(note);
+    } finally {
+      db.close();
+    }
+    const src = new DatabaseSync(tmp);
+    try {
+      createVerifiedSqliteSnapshot(src, target);
+    } finally {
+      src.close();
+    }
+    fs.rmSync(tmp, { force: true });
+    return id;
+  }
+
+  it("A: crash after journal before swap — recover snapshot, do not retry selected restore", () => {
+    seedLiveData("original-before-swap");
+    const safetyId = makeSafetySnapshot("original-before-swap");
+    writeFixtureBackup(SELECTED, (db) => {
+      db.prepare("INSERT INTO fixture_rows (note) VALUES (?)").run("selected");
+    });
+    writeInterruptedPending(safetyId);
+
+    const preCount = fs
+      .readdirSync(backupsDir())
+      .filter((f) => f.startsWith("pre-restore-")).length;
+
+    closeDb();
+    processPendingRestore({ dbPath: process.env.DASHBOARD_DB_PATH });
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(false);
+    expect(state?.message).toMatch(/interrupted.*recovered/i);
+    expect(readLiveMarker()).toBe("original-before-swap");
+
+    // No second pre-restore snapshot for a non-retried attempt.
+    const postCount = fs
+      .readdirSync(backupsDir())
+      .filter((f) => f.startsWith("pre-restore-")).length;
+    expect(postCount).toBe(preCount);
+
+    // Selected restore was NOT applied.
+    const live = new DatabaseSync(process.env.DASHBOARD_DB_PATH!, {
+      readOnly: true,
+    });
+    try {
+      const rows = live.prepare("SELECT note FROM fixture_rows").all();
+      expect(rows).toHaveLength(0);
+    } catch {
+      // table may be absent in original schema — also proves not selected
+    } finally {
+      live.close();
+    }
+
+    // Proven recovery cleans this attempt's stage/hold.
+    const dir = liveDbDir();
+    expect(fs.existsSync(path.join(dir, STAGE))).toBe(false);
+    expect(fs.existsSync(path.join(dir, HOLD))).toBe(false);
+  });
+
+  it("B: crash after original renamed — live missing — recover from snapshot, never hold", () => {
+    const safetyId = makeSafetySnapshot("from-hold-must-not-win");
+    // Hold is a VALID SQLite file with different content — must not be used.
+    const holdPath = path.join(liveDbDir(), HOLD);
+    const holdTmp = path.join(liveDbDir(), "hold-src.sqlite");
+    const holdDb = new DatabaseSync(holdTmp);
+    try {
+      holdDb.exec(`
+        CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);
+        CREATE TABLE marker_rows (id INTEGER PRIMARY KEY, note TEXT NOT NULL);
+        INSERT INTO marker_rows (note) VALUES ('hold-only-marker');
+      `);
+    } finally {
+      holdDb.close();
+    }
+    const holdSrc = new DatabaseSync(holdTmp);
+    try {
+      createVerifiedSqliteSnapshot(holdSrc, holdPath);
+    } finally {
+      holdSrc.close();
+    }
+    fs.rmSync(holdTmp, { force: true });
+    verifySqliteBackup(holdPath);
+
+    writeFixtureBackup(SELECTED);
+    writeInterruptedPending(safetyId);
+
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+    fs.rmSync(dbFile, { force: true });
+
+    processPendingRestore({ dbPath: dbFile });
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(false);
+    expect(state?.message).toMatch(/interrupted.*recovered/i);
+
+    // Recovered logical state is from the pre-restore snapshot, not the hold.
+    expect(fs.existsSync(dbFile)).toBe(true);
+    expect(readLiveMarker()).toBe("from-hold-must-not-win");
+  });
+
+  it("C: crash after candidate became live — do not snapshot candidate; restore prior state", () => {
+    const safetyId = makeSafetySnapshot("prior-owner-state");
+    writeFixtureBackup(SELECTED, (db) => {
+      db.prepare("INSERT INTO fixture_rows (note) VALUES (?)").run("candidate-row");
+    });
+    writeInterruptedPending(safetyId);
+
+    // Simulate candidate already installed at the live path.
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+    fs.copyFileSync(path.join(backupsDir(), SELECTED), dbFile);
+
+    const preCount = fs
+      .readdirSync(backupsDir())
+      .filter((f) => f.startsWith("pre-restore-")).length;
+
+    processPendingRestore({ dbPath: dbFile });
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(false);
+    expect(state?.message).toMatch(/interrupted.*recovered/i);
+
+    // Prior state restored; candidate data gone.
+    expect(readLiveMarker()).toBe("prior-owner-state");
+    const live = new DatabaseSync(dbFile, { readOnly: true });
+    try {
+      const rows = live
+        .prepare("SELECT note FROM fixture_rows")
+        .all() as Array<{ note: string }>;
+      expect(rows.some((r) => r.note === "candidate-row")).toBe(false);
+    } catch {
+      // fixture table absent in recovered prior state is fine
+    } finally {
+      live.close();
+    }
+
+    // Did not create a new safety snapshot of the candidate.
+    const postCount = fs
+      .readdirSync(backupsDir())
+      .filter((f) => f.startsWith("pre-restore-")).length;
+    expect(postCount).toBe(preCount);
+  });
+
+  it("D: interrupted recovery preserves WAL-resident committed marker from snapshot", () => {
+    // Build snapshot with WAL-only committed data.
+    const dir = backupsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const safetyId = "pre-restore-2026-03-04T10-00-00-000Z.sqlite";
+    const target = path.join(dir, safetyId);
+    const tmp = path.join(dir, "wal-src.sqlite");
+    const srcDb = new DatabaseSync(tmp);
+    try {
+      srcDb.exec("PRAGMA journal_mode = WAL;");
+      srcDb.exec("PRAGMA wal_autocheckpoint = 0;");
+      srcDb.exec(`
+        CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);
+        CREATE TABLE marker_rows (id INTEGER PRIMARY KEY, note TEXT NOT NULL);
+      `);
+      srcDb
+        .prepare("INSERT INTO marker_rows (note) VALUES (?)")
+        .run("wal-only-recover-me");
+    } finally {
+      srcDb.close();
+    }
+    const snapSrc = new DatabaseSync(tmp);
+    try {
+      createVerifiedSqliteSnapshot(snapSrc, target);
+    } finally {
+      snapSrc.close();
+    }
+    fs.rmSync(tmp, { force: true });
+
+    writeFixtureBackup(SELECTED);
+    writeInterruptedPending(safetyId);
+    seedLiveData("dirty-candidate-or-live");
+
+    closeDb();
+    processPendingRestore({ dbPath: process.env.DASHBOARD_DB_PATH });
+
+    expect(readLiveMarker()).toBe("wal-only-recover-me");
+    const state = readRestoreState(statePath());
+    expect(state?.startupBlocked).toBe(false);
+  });
+
+  it("E+F: unproven interrupted recovery blocks startup persistently even with valid hold", () => {
+    const safetyId = makeSafetySnapshot("will-corrupt");
+    fs.writeFileSync(path.join(backupsDir(), safetyId), "corrupt-safety");
+
+    // Valid hold must not rescue.
+    const holdPath = path.join(liveDbDir(), HOLD);
+    const holdTmp = path.join(liveDbDir(), "hold-src.sqlite");
+    const holdDb = new DatabaseSync(holdTmp);
+    try {
+      holdDb.exec(
+        `CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);`,
+      );
+    } finally {
+      holdDb.close();
+    }
+    const holdSrc = new DatabaseSync(holdTmp);
+    try {
+      createVerifiedSqliteSnapshot(holdSrc, holdPath);
+    } finally {
+      holdSrc.close();
+    }
+    fs.rmSync(holdTmp, { force: true });
+    verifySqliteBackup(holdPath);
+
+    writeFixtureBackup(SELECTED);
+    writeInterruptedPending(safetyId);
+    closeDb();
+
+    let threw = false;
+    try {
+      processPendingRestore({ dbPath: process.env.DASHBOARD_DB_PATH });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(true);
+
+    // F: second startup still refuses.
+    let threwAgain = false;
+    try {
+      processPendingRestore({ dbPath: process.env.DASHBOARD_DB_PATH });
+    } catch {
+      threwAgain = true;
+    }
+    expect(threwAgain).toBe(true);
+
+    // Hold preserved as forensic material.
+    expect(fs.existsSync(holdPath)).toBe(true);
+  });
+
+  it("G: malformed state with missing DB does not silently initialize empty data", () => {
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+    fs.rmSync(dbFile, { force: true });
+    fs.writeFileSync(statePath(), '{"version":2,"status":"PENDING"}');
+
+    expect(() => processPendingRestore({ dbPath: dbFile })).toThrow();
+    // Must not create a new application database as a side effect of recovery.
+    expect(fs.existsSync(dbFile)).toBe(false);
+  });
+
+  it("H: proven recovery cleans this attempt artifacts; unproven preserves them", () => {
+    // Proven path artifacts cleaned (covered in A). Here: unproven preserves stage+hold.
+    const safetyId = makeSafetySnapshot("x");
+    fs.writeFileSync(path.join(backupsDir(), safetyId), "corrupt");
+    const stagePath = path.join(liveDbDir(), STAGE);
+    const holdPath = path.join(liveDbDir(), HOLD);
+    fs.writeFileSync(stagePath, "stage-leftover");
+    const holdTmp = path.join(liveDbDir(), "hold-src.sqlite");
+    const holdDb = new DatabaseSync(holdTmp);
+    try {
+      holdDb.exec(
+        `CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);`,
+      );
+    } finally {
+      holdDb.close();
+    }
+    const holdSrc = new DatabaseSync(holdTmp);
+    try {
+      createVerifiedSqliteSnapshot(holdSrc, holdPath);
+    } finally {
+      holdSrc.close();
+    }
+    fs.rmSync(holdTmp, { force: true });
+
+    writeFixtureBackup(SELECTED);
+    writeInterruptedPending(safetyId);
+    closeDb();
+
+    expect(() =>
+      processPendingRestore({ dbPath: process.env.DASHBOARD_DB_PATH }),
+    ).toThrow();
+    expect(fs.existsSync(stagePath)).toBe(true);
+    expect(fs.existsSync(holdPath)).toBe(true);
+  });
+});
+
+describe("RestoreService pre-swap safe-start proof (M5-B1 final)", () => {
+  const SELECTED = "manual-2026-03-04T05-06-07-890Z.sqlite";
+
+  function writeInitialPending(): void {
+    fs.writeFileSync(
+      statePath(),
+      JSON.stringify(
+        {
+          version: 2,
+          status: "PENDING",
+          backupId: SELECTED,
+          requestedAt: "2026-03-04T05:06:07.890Z",
+          completedAt: null,
+          preRestoreBackupId: null,
+          message: null,
+          attemptId: null,
+          stageFilename: null,
+          holdFilename: null,
+          startupBlocked: false,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  it("A: initial PENDING + missing current DB → blocked, throws, second startup throws", () => {
+    writeFixtureBackup(SELECTED);
+    writeInitialPending();
+
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+    fs.rmSync(dbFile, { force: true });
+
+    let threw = false;
+    try {
+      processPendingRestore({ dbPath: dbFile });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(true);
+    // Must not create a fresh application database as a side effect.
+    expect(fs.existsSync(dbFile)).toBe(false);
+    // Must not install the selected backup automatically.
+    expect(readLiveMarker()).toBeNull();
+
+    // Second startup also refuses.
+    let threwAgain = false;
+    try {
+      processPendingRestore({ dbPath: dbFile });
+    } catch {
+      threwAgain = true;
+    }
+    expect(threwAgain).toBe(true);
+  });
+
+  it("B: initial PENDING + unusable current DB → file untouched, blocked, throws", () => {
+    writeFixtureBackup(SELECTED);
+    writeInitialPending();
+
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+    // Unusable / not a valid SQLite application database.
+    fs.writeFileSync(dbFile, "this is not a sqlite database at all");
+    const before = fs.readFileSync(dbFile, "utf8");
+
+    let threw = false;
+    try {
+      processPendingRestore({ dbPath: dbFile });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    // Current file was not destructively modified by the failed attempt.
+    expect(fs.readFileSync(dbFile, "utf8")).toBe(before);
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(true);
+
+    let threwAgain = false;
+    try {
+      processPendingRestore({ dbPath: dbFile });
+    } catch {
+      threwAgain = true;
+    }
+    expect(threwAgain).toBe(true);
+  });
+
+  it("C: selected backup missing + healthy current DB → not blocked, data preserved", () => {
+    seedLiveData("control-healthy-current");
+    writeInitialPending();
+    // Selected backup is absent; current DB stays intact and verifiable.
+
+    const dbFile = process.env.DASHBOARD_DB_PATH!;
+    closeDb();
+
+    // Must NOT throw: healthy current DB is independently proven safe.
+    processPendingRestore({ dbPath: dbFile });
+
+    const state = readRestoreState(statePath());
+    expect(state?.status).toBe("FAILED");
+    expect(state?.startupBlocked).toBe(false);
+    expect(readLiveMarker()).toBe("control-healthy-current");
   });
 });

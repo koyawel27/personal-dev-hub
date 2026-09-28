@@ -146,13 +146,17 @@ describe("Restore API (V1.3 M3)", () => {
     fs.writeFileSync(
       statePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         status: "SUCCEEDED",
         backupId: "manual-2026-03-04T05-06-07-890Z.sqlite",
         requestedAt: "2026-03-04T05:06:07.890Z",
         completedAt: "2026-03-04T05:06:08.000Z",
         preRestoreBackupId: "pre-restore-2026-03-04T05-06-08-000Z.sqlite",
         message: null,
+        attemptId: null,
+        stageFilename: null,
+        holdFilename: null,
+        startupBlocked: false,
       }),
     );
     const before = await request(app).get("/api/restore");
