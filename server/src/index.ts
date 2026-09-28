@@ -1,7 +1,10 @@
 import { config } from "./config.js";
 import { getDb } from "./db/client.js";
 import { createApp } from "./app.js";
+import { processPendingRestore } from "./services/RestoreService.js";
 
+// Restart-mediated restore MUST complete before the singleton DB opens.
+processPendingRestore();
 getDb();
 const app = createApp();
 

@@ -54,6 +54,11 @@ import {
   deleteManualBackup,
   listBackups,
 } from "./services/BackupService.js";
+import {
+  clearRestoreState,
+  getRestoreState,
+  scheduleRestore,
+} from "./services/RestoreService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -563,6 +568,34 @@ export function createApp(): express.Express {
     try {
       deleteManualBackup(req.params.id);
       res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M3 restart-mediated restore. POST only SCHEDULES; the live database
+  // is never replaced from an HTTP request.
+  app.get("/api/restore", (_req, res, next) => {
+    try {
+      res.json({ restore: getRestoreState() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/backups/:id/restore", (req, res, next) => {
+    try {
+      const restore = scheduleRestore(req.params.id, req.body);
+      res.status(201).json({ restore });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/api/restore", (_req, res, next) => {
+    try {
+      clearRestoreState();
+      res.json({ ok: true, restore: null });
     } catch (err) {
       next(err);
     }

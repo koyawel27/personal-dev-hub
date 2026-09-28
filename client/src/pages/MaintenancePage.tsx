@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BackupDto, BackupType } from "@shared/api-types";
+import type {
+  BackupDto,
+  BackupType,
+  RestoreStateDto,
+} from "@shared/api-types";
 import { ApiError, client } from "../api";
 import { Badge } from "../components/Badge";
 import { EmptyState } from "../components/EmptyState";
 import { formatBytes, formatDateTime, relativeTime } from "../format";
 
 /**
- * V1.3 M2 Maintenance: application backup inventory and manual create/delete.
- * Restore is intentionally absent (restart-mediated, M3).
+ * V1.3 Maintenance: application backups + restart-mediated restore.
+ * Restore is scheduled only — never applied from the browser.
  */
 
 const TYPE_LABELS: Record<BackupType, string> = {
@@ -20,20 +24,35 @@ function verificationBadge(verification: BackupDto["verification"]) {
   if (verification === "VALID") {
     return <Badge tone="clean">Valid</Badge>;
   }
-  // Invalid is a fact, not an alarm: muted/neutral, never danger styling.
   return <Badge tone="neutral">Invalid</Badge>;
+}
+
+function restoreConfirmMessage(backup: BackupDto): string {
+  return (
+    `Restore Personal Dev Hub application data from this backup?\n\n` +
+    `${backup.filename}\n\n` +
+    `• Application data will be reverted to this backup.\n` +
+    `• A safety backup of the current application data will be created first.\n` +
+    `• Tracked Git repositories will NOT be changed.\n` +
+    `• Restore applies only after restarting Personal Dev Hub.`
+  );
 }
 
 export function MaintenancePage() {
   const [backups, setBackups] = useState<BackupDto[] | null>(null);
+  const [restore, setRestore] = useState<RestoreStateDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    const result = await client.listBackups();
-    setBackups(result.backups);
+    const [list, restoreResult] = await Promise.all([
+      client.listBackups(),
+      client.restoreState(),
+    ]);
+    setBackups(list.backups);
+    setRestore(restoreResult.restore);
     setListError(null);
   }, []);
 
@@ -60,6 +79,8 @@ export function MaintenancePage() {
     }
   }
 
+  const restorePending = restore?.status === "PENDING";
+
   return (
     <div className="maintenance-page">
       <div className="page-header">
@@ -79,6 +100,102 @@ export function MaintenancePage() {
       {notice ? (
         <div className="notice" role="status">
           {notice}
+        </div>
+      ) : null}
+
+      {restore?.status === "PENDING" ? (
+        <div className="notice restore-pending" role="status">
+          <strong>Restore scheduled.</strong> Restart Personal Dev Hub to apply
+          it.
+          <div className="restore-detail">
+            <span>
+              Selected backup:{" "}
+              <span className="mono">{restore.backupId}</span>
+            </span>
+            <span>
+              Requested: {formatDateTime(restore.requestedAt)}
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await client.clearRestoreState();
+                await reload();
+                setNotice("Scheduled restore cancelled.");
+              })
+            }
+          >
+            Cancel Scheduled Restore
+          </button>
+        </div>
+      ) : null}
+
+      {restore?.status === "SUCCEEDED" ? (
+        <div className="notice restore-terminal" role="status">
+          <strong>Restore completed.</strong>
+          <div className="restore-detail">
+            <span>
+              Restored backup: <span className="mono">{restore.backupId}</span>
+            </span>
+            {restore.preRestoreBackupId ? (
+              <span>
+                Safety backup:{" "}
+                <span className="mono">{restore.preRestoreBackupId}</span>
+              </span>
+            ) : null}
+            {restore.completedAt ? (
+              <span>Completed: {formatDateTime(restore.completedAt)}</span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await client.clearRestoreState();
+                await reload();
+                setNotice("Restore result dismissed.");
+              })
+            }
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {restore?.status === "FAILED" ? (
+        <div className="error restore-terminal" role="alert">
+          <strong>Restore did not complete.</strong>
+          {restore.message ? <div>{restore.message}</div> : null}
+          <div className="restore-detail">
+            <span>
+              Selected backup: <span className="mono">{restore.backupId}</span>
+            </span>
+            {restore.preRestoreBackupId ? (
+              <span>
+                Safety backup:{" "}
+                <span className="mono">{restore.preRestoreBackupId}</span>
+              </span>
+            ) : null}
+            {restore.completedAt ? (
+              <span>Finished: {formatDateTime(restore.completedAt)}</span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await client.clearRestoreState();
+                await reload();
+                setNotice("Restore result dismissed.");
+              })
+            }
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -151,15 +268,39 @@ export function MaintenancePage() {
                   </div>
                 </div>
                 <div className="backup-actions">
+                  {backup.verification === "VALID" ? (
+                    <button
+                      type="button"
+                      className="btn subtle restore-action"
+                      disabled={busy || restorePending}
+                      title={
+                        restorePending
+                          ? "A restore is already scheduled"
+                          : "Restore this backup after restart"
+                      }
+                      onClick={() => {
+                        const confirmed = window.confirm(
+                          restoreConfirmMessage(backup),
+                        );
+                        if (!confirmed) return;
+                        void run(async () => {
+                          await client.scheduleRestore(backup.id);
+                          await reload();
+                          setNotice(
+                            "Restore scheduled. Restart Personal Dev Hub to apply it.",
+                          );
+                        });
+                      }}
+                    >
+                      Restore
+                    </button>
+                  ) : null}
                   {backup.type === "MANUAL" ? (
                     <button
                       type="button"
                       className="danger"
                       disabled={busy}
                       onClick={() => {
-                        // Owner confirmation before any mutation. Cancel leaves
-                        // the page completely unchanged (no busy state, no
-                        // DELETE, no reload, no notice).
                         const confirmed = window.confirm(
                           `Delete this manual backup permanently?\n\n` +
                             `${backup.filename}\n\n` +
@@ -187,7 +328,8 @@ export function MaintenancePage() {
 
         <p className="settings-tool-note">
           Manual backups can be deleted. Migration and restore-safety backups are
-          kept automatically. Restore is not available yet.
+          kept automatically. Restore reverts application data only, after a
+          restart, and never changes tracked Git repositories.
         </p>
       </section>
     </div>

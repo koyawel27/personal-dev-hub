@@ -510,3 +510,28 @@ export type CreateBackupResponse = {
 export type DeleteBackupResponse = {
   ok: true;
 };
+
+/** Restart-mediated restore lifecycle (filesystem-backed, M3). */
+export type RestoreStatus = "PENDING" | "SUCCEEDED" | "FAILED";
+
+export type RestoreStateDto = {
+  status: RestoreStatus;
+  backupId: string;
+  requestedAt: string;
+  completedAt: string | null;
+  preRestoreBackupId: string | null;
+  message: string | null;
+};
+
+export type RestoreStateResponse = {
+  restore: RestoreStateDto | null;
+};
+
+export type ScheduleRestoreRequest = {
+  /** Must be the literal boolean true — no implicit restore. */
+  confirmRestore: true;
+};
+
+export type ScheduleRestoreResponse = {
+  restore: RestoreStateDto;
+};

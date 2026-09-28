@@ -18,6 +18,8 @@ import type {
   RelinkLocalBindingResponse,
   RepositoryDetail,
   RepositoryListItem,
+  RestoreStateResponse,
+  ScheduleRestoreResponse,
   SetPrimaryLocalBindingResponse,
   ScanSummary,
   SourceDto,
@@ -239,4 +241,16 @@ export const client = {
     api<DeleteBackupResponse>(`/api/backups/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+  // --- V1.3 M3 restart-mediated restore ---
+  restoreState: () => api<RestoreStateResponse>("/api/restore"),
+  scheduleRestore: (id: string) =>
+    api<ScheduleRestoreResponse>(
+      `/api/backups/${encodeURIComponent(id)}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confirmRestore: true }),
+      },
+    ),
+  clearRestoreState: () =>
+    api<{ ok: true; restore: null }>("/api/restore", { method: "DELETE" }),
 };
