@@ -49,6 +49,27 @@ Then open:
 
 Personal Dev Hub does not currently ship with a Windows installer. The current public release is source-based.
 
+### Windows one-click launcher
+
+This is **launcher tooling**, not a packaged standalone application. Node.js and this source checkout remain required.
+
+1. One-time setup in the repository:
+
+   ```bat
+   npm install
+   npm run build
+   ```
+
+2. Create a Desktop shortcut (run once):
+
+   ```bat
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\Install-PersonalDevHubShortcut.ps1
+   ```
+
+3. Afterward, double-click **Personal Dev Hub** on the Desktop.
+
+The launcher starts `npm start` quietly if the app is not already healthy, waits for `http://127.0.0.1:8787/api/health`, then opens `http://127.0.0.1:8787`. Runtime logs go under `data/launcher/` (gitignored). There is no embedded Node runtime or Windows installer yet.
+
 ## Screenshots
 
 ### Dashboard
