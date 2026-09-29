@@ -49,6 +49,26 @@ Then open:
 
 Personal Dev Hub does not currently ship with a Windows installer. The current public release is source-based.
 
+## Screenshots
+
+### Dashboard
+
+Overview of tracked projects, recent activity, commit activity, and local Git state.
+
+![Personal Dev Hub dashboard](docs/dashboard.png)
+
+### Project workspace
+
+Project metadata, local bindings, primary repository copy, and workspace actions.
+
+![Personal Dev Hub project detail](docs/project-detail.png)
+
+### Maintenance and recovery
+
+Verified application backups and tracked-source health.
+
+![Personal Dev Hub maintenance](docs/maintenance.png)
+
 ## Checks
 
 ```bat
