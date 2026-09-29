@@ -481,3 +481,81 @@ export type ScanSummary = {
   repositoriesDiscovered: number;
   repositoriesRefreshed: number;
 };
+
+/** App-managed backup classification (filesystem-backed inventory). */
+export type BackupType = "MANUAL" | "MIGRATION" | "RESTORE_SAFETY";
+
+/** Read-only verification verdict from the M1 snapshot verifier. */
+export type BackupVerification = "VALID" | "INVALID";
+
+/** One recognized app-managed backup file in the live DB backups directory. */
+export type BackupDto = {
+  /** Opaque stable handle: the exact app-managed filename. */
+  id: string;
+  filename: string;
+  type: BackupType;
+  createdAt: string;
+  sizeBytes: number;
+  verification: BackupVerification;
+};
+
+export type ListBackupsResponse = {
+  backups: BackupDto[];
+};
+
+export type CreateBackupResponse = {
+  backup: BackupDto;
+};
+
+export type DeleteBackupResponse = {
+  ok: true;
+};
+
+/** Restart-mediated restore lifecycle (filesystem-backed, M3). */
+export type RestoreStatus = "PENDING" | "SUCCEEDED" | "FAILED";
+
+export type RestoreStateDto = {
+  status: RestoreStatus;
+  backupId: string;
+  requestedAt: string;
+  completedAt: string | null;
+  preRestoreBackupId: string | null;
+  message: string | null;
+};
+
+export type RestoreStateResponse = {
+  restore: RestoreStateDto | null;
+};
+
+export type ScheduleRestoreRequest = {
+  /** Must be the literal boolean true — no implicit restore. */
+  confirmRestore: true;
+};
+
+export type ScheduleRestoreResponse = {
+  restore: RestoreStateDto;
+};
+
+/**
+ * V1.3 M4 Maintenance source-health attention item.
+ * Health is derived at read time (filesystem existence + cached Git verdict).
+ * This endpoint never runs Git and never mutates health/Activity.
+ */
+export type SourceHealthItemDto = {
+  projectId: number;
+  projectName: string;
+  bindingId: number;
+  bindingName: string;
+  localPath: string;
+  isPrimary: boolean;
+  health: LocalBindingHealthDto;
+};
+
+export type SourceHealthResponse = {
+  totalLocalBindings: number;
+  attentionCount: number;
+  pathMissingCount: number;
+  notGitRepoCount: number;
+  unscannedCount: number;
+  items: SourceHealthItemDto[];
+};

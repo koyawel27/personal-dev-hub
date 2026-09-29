@@ -49,6 +49,17 @@ import {
   getDefaultScanDepth,
   setDefaultScanDepth,
 } from "./services/SettingsService.js";
+import {
+  createManualBackup,
+  deleteManualBackup,
+  listBackups,
+} from "./services/BackupService.js";
+import {
+  clearRestoreState,
+  getRestoreState,
+  scheduleRestore,
+} from "./services/RestoreService.js";
+import { listSourceHealth } from "./services/SourceHealthService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -531,6 +542,71 @@ export function createApp(): express.Express {
           dataPath: config.dbPath,
         },
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M2 application backups: filesystem-backed inventory, manual create
+  // and MANUAL-only delete. Restore is intentionally absent (M3).
+  app.get("/api/backups", (_req, res, next) => {
+    try {
+      res.json({ backups: listBackups() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/backups", (_req, res, next) => {
+    try {
+      res.status(201).json({ backup: createManualBackup() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/api/backups/:id", (req, res, next) => {
+    try {
+      deleteManualBackup(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M3 restart-mediated restore. POST only SCHEDULES; the live database
+  // is never replaced from an HTTP request.
+  app.get("/api/restore", (_req, res, next) => {
+    try {
+      res.json({ restore: getRestoreState() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/backups/:id/restore", (req, res, next) => {
+    try {
+      const restore = scheduleRestore(req.params.id, req.body);
+      res.status(201).json({ restore });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/api/restore", (_req, res, next) => {
+    try {
+      clearRestoreState();
+      res.json({ ok: true, restore: null });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // V1.3 M4 Source Health Center: read-only attention list. Never runs Git,
+  // never refreshes repositories, never mutates health or Activity.
+  app.get("/api/maintenance/source-health", (_req, res, next) => {
+    try {
+      res.json(listSourceHealth());
     } catch (err) {
       next(err);
     }

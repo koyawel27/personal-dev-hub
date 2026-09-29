@@ -4,6 +4,7 @@ import {
   IconActivity,
   IconContributions,
   IconDashboard,
+  IconMaintenance,
   IconPortfolio,
   IconProjects,
   IconSettings,
@@ -20,6 +21,7 @@ const primary = [
 
 const utility = [
   { to: "/sources", label: "Sources", Icon: IconSources },
+  { to: "/maintenance", label: "Maintenance", Icon: IconMaintenance },
   { to: "/settings", label: "Settings", Icon: IconSettings },
 ];
 

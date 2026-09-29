@@ -3,6 +3,7 @@ import { AppShell } from "./layout/AppShell";
 import { ActivityPage } from "./pages/ActivityPage";
 import { ContributionsPage } from "./pages/ContributionsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { MaintenancePage } from "./pages/MaintenancePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -20,6 +21,7 @@ export function App() {
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/sources" element={<SourcesPage />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

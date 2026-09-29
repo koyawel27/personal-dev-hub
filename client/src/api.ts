@@ -3,19 +3,25 @@ import type {
   AddLocalBindingResponse,
   ApiErrorBody,
   ContributionDayDto,
+  CreateBackupResponse,
   DailyDetailResponse,
   DashboardResponse,
+  DeleteBackupResponse,
   DeleteLocalBindingResponse,
   FolderSelectionResponse,
   GitHubStatusDto,
   HealthResponse,
+  ListBackupsResponse,
   PortfolioItemDto,
   ProjectDetailDto,
   ProjectListItemDto,
   RelinkLocalBindingResponse,
   RepositoryDetail,
   RepositoryListItem,
+  RestoreStateResponse,
+  ScheduleRestoreResponse,
   SetPrimaryLocalBindingResponse,
+  SourceHealthResponse,
   ScanSummary,
   SourceDto,
   PickerEntryDto,
@@ -228,4 +234,27 @@ export const client = {
       `/api/github/tracked/${githubBindingId}/refresh`,
       { method: "POST" },
     ),
+  // --- V1.3 M2 application backups (Maintenance) ---
+  listBackups: () => api<ListBackupsResponse>("/api/backups"),
+  createBackup: () =>
+    api<CreateBackupResponse>("/api/backups", { method: "POST" }),
+  deleteBackup: (id: string) =>
+    api<DeleteBackupResponse>(`/api/backups/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  // --- V1.3 M3 restart-mediated restore ---
+  restoreState: () => api<RestoreStateResponse>("/api/restore"),
+  scheduleRestore: (id: string) =>
+    api<ScheduleRestoreResponse>(
+      `/api/backups/${encodeURIComponent(id)}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confirmRestore: true }),
+      },
+    ),
+  clearRestoreState: () =>
+    api<{ ok: true; restore: null }>("/api/restore", { method: "DELETE" }),
+  // --- V1.3 M4 Maintenance source health (read-only attention list) ---
+  sourceHealth: () =>
+    api<SourceHealthResponse>("/api/maintenance/source-health"),
 };
