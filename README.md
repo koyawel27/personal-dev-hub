@@ -57,6 +57,7 @@ npm run build
 | Contributions | Original activity calendar with three honest views — Local, GitHub (tracked repositories), Combined (a commit SHA present in both the local and GitHub tracked datasets is counted once, with the overlap reported transparently); counts are commits, never hours; not a full GitHub profile graph |
 | Portfolio | Selected-work view over projects: notes, type/status, technology hints (manifest probes, or GitHub's reported primary language for GitHub-only items), first/latest known commit dates, simple ordering. GitHub-only projects are eligible without a local clone |
 | Sources | Multiple scan locations with depth control; manual add of a standalone local repository (creates a Project's initial local binding); native folder browsing; GitHub repository picker. Project metadata lives on the Project itself (`PATCH /api/projects/:projectId/metadata`), never on a repository row. Add Local Copy and Relink belong to Project Detail, not the global Sources workflow |
+| Maintenance | Operational recovery for the app database: create and inspect manual backups, browse the backup inventory (with verification state), schedule a restart-mediated restore, and review Source Health attention items (local copies that need a manual Rescan or Relink). Distinct from Settings — Maintenance is recovery/repair, Settings is configuration |
 | Settings | Git executable status, GitHub connection summary (CLI installed / account connected via your existing `gh` login), default scan depth, app data location, rescan controls |
 
 ### Multiple local copies, primary, and per-binding health
@@ -69,6 +70,10 @@ A Project can track several local Git copies (0..many). One binding is the **dis
 
 Health is per binding: `OK` (verified as a Git worktree at the last explicit scan/refresh), `NOT_A_GIT_REPO` (path exists but was not a Git worktree at the last check), `PATH_MISSING` (the stored path no longer exists), `UNSCANNED` (never inspected). Relink is the recovery path for `PATH_MISSING`.
 
+### Source Health (Maintenance)
+
+Maintenance surfaces local copies that need attention: `PATH_MISSING`, `NOT_A_GIT_REPO`, and `UNSCANNED`. Normal health rendering does **not** run Git. `OK` and `NOT_A_GIT_REPO` are based on the last explicit scan/refresh; path existence is checked at read time. Repair is manual via **Rescan** / **Relink**. There is no watcher, daemon, or automatic repair.
+
 ## Privacy behavior
 
 - Only metadata is stored: paths, branches, file counts, commit subjects/authors/timestamps, remotes, activity events, cached GitHub repository facts, and your own notes.
@@ -80,7 +85,30 @@ Health is per binding: `OK` (verified as a Git worktree at the last explicit sca
 
 Everything persists in `data/dashboard.sqlite` inside the project folder (override with the `DASHBOARD_DB_PATH` environment variable). Delete that file to reset the app; your repositories are untouched.
 
-**Automatic migration backups:** declared rebuild migrations (schema-changing operations that recreate tables) automatically snapshot the database before any DDL into `<database-directory>/backups/`. The snapshot uses consistent SQLite semantics that include committed write-ahead-log state, and it is verified (readable, `PRAGMA integrity_check` clean, schema present) before the migration proceeds. A failed attempt's backup is preserved and marked; older ordinary snapshots are pruned, keeping the newest 3. This is migration-safety infrastructure — the app has no user-facing "Create backup now" or restore feature in V1.2.
+### Backups and restore
+
+**What backups cover:** Personal Dev Hub's SQLite application data and metadata (projects, bindings, settings, activity, history).
+
+**What backups do not cover:** tracked Git repositories or the source code/files inside them. Tracked repositories remain untouched.
+
+The app manages three backup categories under `<database-directory>/backups/`:
+
+| Category | Created by | Deletable from Maintenance? |
+| --- | --- | --- |
+| **Manual** | You, from Maintenance ("Create backup now") | Yes |
+| **Migration** | Automatic safety snapshot before a declared rebuild migration; existing retention policy keeps the newest ordinary snapshots | No (migration retention only) |
+| **Restore safety** | Automatic snapshot taken immediately before an applied restore | No — preserved for recovery |
+
+Every backup is produced with consistent SQLite semantics (committed write-ahead-log state included) and verified before use.
+
+### Restore semantics
+
+- Restore is **scheduled** from Maintenance — it does not hot-swap the running database.
+- **Restart Personal Dev Hub** to apply it.
+- At startup the selected backup is verified again, the current app database is snapshotted first (restore safety), and the restore is validated before it is marked successful.
+- Tracked Git repositories are unaffected.
+
+If interrupted recovery cannot prove application data is safe, startup may refuse to continue rather than initialize a fresh database. Do not casually delete internal recovery state files; investigate before clearing them.
 
 ## Limitations
 
@@ -89,8 +117,11 @@ Everything persists in `data/dashboard.sqlite` inside the project folder (overri
 - GitHub-side commits are stored for tracked repositories after a manual refresh (bounded to the most recent ~100 per repository); the GitHub view of Contributions covers exactly that data.
 - Contributions is year-based, with available-year selection (years listed newest-first); it is not a replication of GitHub's full profile contribution graph.
 - A project has at most one GitHub binding; local copies are 0..many, with one explicit display primary per project (owner-selectable; oldest-binding fallback for legacy/malformed data).
-- No user-facing manual backup/restore workflow in V1.2 — only the automatic rebuild-migration backups described above.
-- No notifications, background watching/sync daemon, OAuth, cloning, AI features, or team/corporate anything — by design. Advanced mobile polish remains deferred.
+- Manual Git/GitHub refresh semantics only: ahead/behind and GitHub enrichment update when you rescan or refresh — there is no daemon or background sync.
+- Backups are app-managed only: no cloud backup, no scheduled backups, no arbitrary filesystem restore/import.
+- Restore replaces the application database at the next restart; it does not repair or rewrite tracked Git repositories.
+- No automatic repository repair — Source Health flags attention items; Rescan/Relink stay manual.
+- No notifications, OAuth, cloning, AI features, or team/corporate anything — by design. Advanced mobile polish remains deferred.
 
 ## Disposable test repository
 

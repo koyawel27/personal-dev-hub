@@ -6,7 +6,7 @@
 > Product direction: personal developer workspace / lightweight project tracker  
 > Target: Windows-first, local-first, single-user V1
 
-**Document status:** V1.1 remains the prior **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is **finalized**: feature-complete, owner-accepted, merged to main, verified, and tagged as `personal-dev-hub-v1.2-owner-accepted` (canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`; feature checkpoint `1e330501e8c4e25aca0e2eaff5029f3955756b69`) — see `docs/RELEASE_V1.2.md`. Sections below describe the current V1.2 implementation unless explicitly marked historical.
+**Document status:** V1.1 remains a prior **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is the latest **finalized and tagged** owner-accepted release (see `docs/RELEASE_V1.2.md`; tag `personal-dev-hub-v1.2-owner-accepted`, canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`). **V1.3 is the current feature-complete release candidate** on `feature/v1.3` — release hardening complete, **pending final owner acceptance, merge to main, merged-main verification, and an immutable acceptance tag**. Sections below describe the current V1.3 candidate implementation unless explicitly marked historical; historical V1.1/V1.2 release descriptions are preserved as history.
 
 ---
 
@@ -76,17 +76,28 @@ V1 is explicitly **single-user**.
 
 ## 4. V1 information architecture
 
-Main navigation:
+Main navigation (actual app order):
+
+**Workspace**
 
 1. **Dashboard**
 2. **Projects**
 3. **Activity**
 4. **Contributions**
 5. **Portfolio**
+
+**Manage**
+
 6. **Sources**
-7. **Settings**
+7. **Maintenance**
+8. **Settings**
 
 Project Detail is accessed from Projects and Dashboard.
+
+**Maintenance is distinct from Settings:**
+
+- **Maintenance** — operational recovery: backups / restore, Source Health attention and repair entry points (Rescan / Relink).
+- **Settings** — configuration: Git status, GitHub connection summary, scan depth, app data location, rescan controls.
 
 ---
 
@@ -412,7 +423,7 @@ Removing a repository from the app must not delete or modify the real filesystem
 
 ## 12. Settings
 
-Keep Settings minimal. Recommended V1 settings:
+Keep Settings minimal. Settings is **configuration only** — operational recovery (backups, restore, Source Health repair entry points) lives in **Maintenance**, not here. Recommended V1 settings:
 
 - Git executable status
 - GitHub CLI / authentication status when available
@@ -536,7 +547,31 @@ Declared rebuild migrations automatically snapshot the database before any DDL:
 - failed/unverifiable output is removed; a pre-existing exact destination is protected — never overwritten or deleted
 - `.failed`-marked backups are exempt from pruning and do not consume ordinary retention; retention keeps the newest 3 older ordinary backups (`BACKUP_RETENTION = 3`)
 
-This is migration-safety infrastructure, not a user-facing manual backup/restore UI.
+This remains the automatic **MIGRATION** backup category (see the V1.3 Recovery & Maintenance section). V1.3 additionally provides owner-facing **MANUAL** backups and restart-mediated restore under Maintenance.
+
+---
+
+## 15.11 V1.3 Recovery & Maintenance (bounded)
+
+V1.3 does **not** rewrite the V1.1/V1.2 architecture. It adds one operational surface: a top-level **Maintenance** page for application-data recovery and source-health attention.
+
+### Locked V1.3 decisions
+
+- **Top-level Maintenance page** — distinct from Settings (recovery vs configuration).
+- **Filesystem-backed backup inventory** — `<database-directory>/backups/` is the source of truth; listing classifies recognized app-managed artifacts.
+- **Zero new SQLite migrations** — V1.3 adds no migration files and no `schema.sql` changes relative to accepted V1.2.
+- **Reusable verified snapshot primitive** — `VACUUM INTO` + verification (exists, non-empty, read-only open, `PRAGMA integrity_check == "ok"`, schema present). Used by manual backups, migration backups, and restore safety snapshots.
+- **Three backup types:** `MANUAL` (owner-created from Maintenance; owner-deletable), `MIGRATION` (automatic pre-rebuild safety; existing retention policy), `RESTORE_SAFETY` (automatic snapshot immediately before an applied restore; preserved for recovery; not deletable through the normal manual-delete workflow).
+- **Manual backup workflow** — owner can create and inspect verified backups of the application database.
+- **Restart-mediated restore** — restore is scheduled from Maintenance; it does **not** hot-swap the running DB. Restart applies it: selected backup verified again, current DB snapshotted first, restore validated before success.
+- **App-managed backups only** — backups cover Personal Dev Hub's SQLite application data/metadata. They do **not** cover tracked Git repositories or source files inside them. Tracked repositories remain untouched.
+- **Crash-safe restore attempt journal** — V1.3 restore processing includes a versioned attempt journal so interrupted restores can be recovered deterministically (internal transient operational state; not SQLite schema).
+- **Fail-closed persistent startup blocking** — if interrupted recovery cannot prove application data is safe, startup refuses to continue rather than initialize a fresh database.
+- **Source Health reuses V1.2 health states** — `PATH_MISSING`, `NOT_A_GIT_REPO`, `UNSCANNED` are the attention view; normal health rendering remains Git-process-free (`OK` / `NOT_A_GIT_REPO` from last explicit scan/refresh; path existence checked at read time).
+- **Relink / Rescan reused** — repair stays manual; no watcher, daemon, or auto-repair.
+- **Tracked Git repositories remain read-only.**
+
+Restore concerns Personal Dev Hub **application data** (projects, bindings, settings, activity, history) — not the tracked repositories themselves.
 
 ---
 
@@ -874,3 +909,32 @@ V1.2 is complete and owner-accepted (feature checkpoint `1e330501e8c4e25aca0e2ea
 - [x] Annotated acceptance tag `personal-dev-hub-v1.2-owner-accepted` → canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`, tree `27e770114d078af368ad97da75ce091d727eb0d3` (immutable; `personal-dev-hub-v1.1-owner-accepted` remains immutable, and later documentation-only commits on main do not redefine or move the accepted application checkpoint)
 
 No V1.2 release-finalization item remains pending.
+
+---
+
+## 28. V1.3 definition of done / release status
+
+V1.3 is a **feature-complete release candidate** on `feature/v1.3` (head `ec338558f7c07602ab6e698ab75a675916175280` at M5-B1). Release hardening is complete. **Final owner acceptance, merge to main, merged-main verification, and an immutable acceptance tag are still pending.**
+
+Theme: **Recovery & Maintenance.**
+
+**Complete:**
+
+- [x] M1 — verified SQLite backup foundation (reusable `VACUUM INTO` + verification primitive)
+- [x] M2 — manual backup + backup history (Maintenance; `MANUAL` / `MIGRATION` / `RESTORE_SAFETY` inventory)
+- [x] M3 — safe restart-mediated restore (no hot-swap; pre-restore safety snapshot; validated apply)
+- [x] M4 — Source Health Center (attention view reusing V1.2 health states; Rescan/Relink repair)
+- [x] M5-A — release hardening audit
+- [x] M5-B1 — crash-safe restore attempt recovery (version 2 restore-state journal; fail-closed startup blocking)
+- [x] M5-B2 — deterministic V1.2 → V1.3 compatibility QA (zero schema/migration delta proven; fixture open preserves data) and fresh-database release QA
+- [x] Automated suite / typecheck / production build available from actual M5-B2 run: **56 test files / 380 tests passed**; typecheck PASS; production build PASS
+
+**Pending (owner / release finalization — not pre-checked):**
+
+- [ ] Final owner live acceptance
+- [ ] Merge `feature/v1.3` → `main`
+- [ ] Merged-main verification
+- [ ] Immutable acceptance tag (intended name `personal-dev-hub-v1.3-owner-accepted` — **planned; not yet created**)
+- [ ] Final release-record canonical checkpoint update (docs-only commit on main recording accepted application commit/tree/tag — must not redefine the application checkpoint)
+
+Historical feature milestone SHAs on `feature/v1.3` (for reference only): M1 `7257ddc`, M2 `131effd`, M3 `d7b5af3`, M4 `32040d2`, M5-B1 `ec338558`. The future M5-B2 commit SHA is intentionally not embedded in the commit that contains this document.
