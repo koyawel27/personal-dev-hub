@@ -1,6 +1,8 @@
 # Personal Dev Hub
 
-A personal, local-first developer workspace for one machine. It combines your local Git repositories, optional GitHub tracking, lightweight project tracking, recent development activity, contribution history, and selected portfolio work into one simple local web app.
+A **Windows-first**, **local-first**, **single-user** developer workspace for one machine. It combines your local Git repositories, optional GitHub tracking, lightweight project tracking, recent development activity, contribution history, selected portfolio work, and application-data recovery (backups / restore) into one simple local web app.
+
+Personal Dev Hub is currently distributed as **source code**. There is no desktop installer.
 
 The central question it answers:
 
@@ -10,11 +12,28 @@ The dashboard is **read-only** toward tracked repositories. It never runs `git f
 
 ## Requirements
 
+- Windows
 - Node.js 24.19+ (uses the built-in `node:sqlite` module)
 - system Git
-- optional: GitHub CLI (`gh`) for GitHub metadata and contribution enrichment
+- optional: GitHub CLI (`gh`) for GitHub metadata and contribution enrichment (local-only usage does not require it)
 
-## Start
+## Quick start
+
+```bat
+git clone https://github.com/koyawel27/personal-dev-hub.git
+cd personal-dev-hub
+npm install
+npm run build
+npm start
+```
+
+Then open:
+
+- **http://127.0.0.1:8787**
+
+The API binds **only** to `127.0.0.1`. SQLite is created automatically at `data/dashboard.sqlite`.
+
+### Development
 
 ```bat
 npm install
@@ -26,16 +45,9 @@ Then open:
 - UI: http://127.0.0.1:5173
 - Health: http://127.0.0.1:8787/api/health
 
-The API binds **only** to `127.0.0.1`. SQLite is created automatically at `data/dashboard.sqlite`.
+### Installer status
 
-### Production
-
-```bat
-npm run build
-npm start
-```
-
-Then open http://127.0.0.1:8787
+Personal Dev Hub does not currently ship with a Windows installer. The current public release is source-based.
 
 ## Checks
 
@@ -103,10 +115,10 @@ Every backup is produced with consistent SQLite semantics (committed write-ahead
 
 ### Restore semantics
 
-- Restore is **scheduled** from Maintenance — it does not hot-swap the running database.
-- **Restart Personal Dev Hub** to apply it.
+- Restore is **restart-mediated**: scheduled from Maintenance and applied only after you restart Personal Dev Hub.
+- It does **not** hot-swap the running database.
 - At startup the selected backup is verified again, the current app database is snapshotted first (restore safety), and the restore is validated before it is marked successful.
-- Tracked Git repositories are unaffected.
+- Tracked Git repositories and project source files are unaffected.
 
 If interrupted recovery cannot prove application data is safe, startup may refuse to continue rather than initialize a fresh database. Do not casually delete internal recovery state files; investigate before clearing them.
 
@@ -150,3 +162,8 @@ Add that folder under **Sources → Local Repositories**, then change it *outsid
 The dashboard must observe these states without modifying the fixture.
 
 `fixtures/disposable-repo/` is gitignored if you keep a local copy inside this project.
+
+## License
+
+Personal Dev Hub is released under the MIT License.
+See [`LICENSE`](LICENSE).
