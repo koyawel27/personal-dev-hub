@@ -6,7 +6,7 @@
 > Product direction: personal developer workspace / lightweight project tracker  
 > Target: Windows-first, local-first, single-user V1
 
-**Document status:** V1.1 remains a prior **finalized and tagged** owner-accepted historical release (see `docs/RELEASE_V1.1.md`). V1.2 is the latest **finalized and tagged** owner-accepted release (see `docs/RELEASE_V1.2.md`; tag `personal-dev-hub-v1.2-owner-accepted`, canonical accepted application commit `a32c436b29090543b92af6b501d7ddd755087fb8`). **V1.3 is the current feature-complete release candidate** on `feature/v1.3` — release hardening complete, **pending final owner acceptance, merge to main, merged-main verification, and an immutable acceptance tag**. Sections below describe the current V1.3 candidate implementation unless explicitly marked historical; historical V1.1/V1.2 release descriptions are preserved as history.
+**Document status:** V1.1 and V1.2 remain prior **finalized and tagged** owner-accepted historical releases (see `docs/RELEASE_V1.1.md`, `docs/RELEASE_V1.2.md`). **V1.3 is finalized**: feature-complete, owner-accepted, merged to main, verified, and tagged as `personal-dev-hub-v1.3-owner-accepted` (canonical accepted application commit `fae98e44a611c76881b1b302d6105aeb2987be88`) — see `docs/RELEASE_V1.3.md`. Sections below describe the current V1.3 implementation unless explicitly marked historical; historical V1.1/V1.2 release descriptions are preserved as history.
 
 ---
 
@@ -914,7 +914,7 @@ No V1.2 release-finalization item remains pending.
 
 ## 28. V1.3 definition of done / release status
 
-V1.3 is a **feature-complete release candidate** on `feature/v1.3` (head `ec338558f7c07602ab6e698ab75a675916175280` at M5-B1). Release hardening is complete. **Final owner acceptance, merge to main, merged-main verification, and an immutable acceptance tag are still pending.**
+V1.3 is complete and owner-accepted (merged to main and tagged `personal-dev-hub-v1.3-owner-accepted`). Release status:
 
 Theme: **Recovery & Maintenance.**
 
@@ -927,14 +927,20 @@ Theme: **Recovery & Maintenance.**
 - [x] M5-A — release hardening audit
 - [x] M5-B1 — crash-safe restore attempt recovery (version 2 restore-state journal; fail-closed startup blocking)
 - [x] M5-B2 — deterministic V1.2 → V1.3 compatibility QA (zero schema/migration delta proven; fixture open preserves data) and fresh-database release QA
-- [x] Automated suite / typecheck / production build available from actual M5-B2 run: **56 test files / 380 tests passed**; typecheck PASS; production build PASS
+- [x] Automated full suite / typecheck / production build: **56 test files / 380 tests passed**; typecheck PASS; production build PASS
+- [x] Final owner live acceptance (browser: workspace + Maintenance + backup/restore confirm/cancel + Source Health + Rescan; console sanity)
+- [x] Merge `feature/v1.3` → `main`
+- [x] Merged-main verification (56/56 files, 380/380 tests, typecheck, production build, `git diff --check`, content parity with `feature/v1.3`)
+- [x] Immutable acceptance tag `personal-dev-hub-v1.3-owner-accepted`
+- [x] Canonical accepted application commit / tree / tag recorded
+- [x] Final docs-only release record (`docs/RELEASE_V1.3.md`; must not redefine the application checkpoint)
 
-**Pending (owner / release finalization — not pre-checked):**
+**Canonical accepted application checkpoint:**
 
-- [ ] Final owner live acceptance
-- [ ] Merge `feature/v1.3` → `main`
-- [ ] Merged-main verification
-- [ ] Immutable acceptance tag (intended name `personal-dev-hub-v1.3-owner-accepted` — **planned; not yet created**)
-- [ ] Final release-record canonical checkpoint update (docs-only commit on main recording accepted application commit/tree/tag — must not redefine the application checkpoint)
+- tag: `personal-dev-hub-v1.3-owner-accepted` (immutable)
+- commit: `fae98e44a611c76881b1b302d6105aeb2987be88`
+- tree: `9d320205a050967c0b214f32d3001909040fe1e0`
 
-Historical feature milestone SHAs on `feature/v1.3` (for reference only): M1 `7257ddc`, M2 `131effd`, M3 `d7b5af3`, M4 `32040d2`, M5-B1 `ec338558`. The future M5-B2 commit SHA is intentionally not embedded in the commit that contains this document.
+Historical feature milestone SHAs on `feature/v1.3` (for reference only): M1 `7257ddc`, M2 `131effd`, M3 `d7b5af3`, M4 `32040d2`, M5-B1 `ec338558`, M5-B2 / release-candidate docs+compatibility checkpoint `0191e570021d51ec6145df4d689d05d156eb1a9b`. The docs-only commit that finalizes this record is intentionally not embedded in the commit that contains this document.
+
+No V1.3 release-finalization item remains pending.

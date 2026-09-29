@@ -1,14 +1,20 @@
 # Personal Dev Hub — Release V1.3
 
-**Status:** Release candidate — feature-complete, pending final owner acceptance.
+**Status:** complete and owner-accepted.
 
-**Branch:** `feature/v1.3`
+**Accepted application checkpoint tag:** `personal-dev-hub-v1.3-owner-accepted` (immutable)
+
+**Canonical accepted application commit:** `fae98e44a611c76881b1b302d6105aeb2987be88`
+
+**Accepted application tree:** `9d320205a050967c0b214f32d3001909040fe1e0`
+
+**Feature branch final release-candidate checkpoint (historical):** `0191e570021d51ec6145df4d689d05d156eb1a9b`
+
+**Feature branch historical base:** `d24727a2923e04293133b08dab0f8c6cb557a797`
+
+> Following the V1.1/V1.2 release-record pattern: the canonical application commit, tree, and tag above are the release anchor. Later documentation-only commits on main (including this one) do not redefine or move the accepted application checkpoint.
 
 **Release theme:** Recovery & Maintenance
-
-> V1.2 (`personal-dev-hub-v1.2-owner-accepted`) remains the latest finalized / tagged owner-accepted release until V1.3 completes final owner acceptance, merge to main, merged-main verification, and an immutable acceptance tag. This document describes the V1.3 release **candidate** on `feature/v1.3`. It does not claim that V1.3 is merged, tagged, or owner-accepted.
-
-**Planned acceptance tag name (not yet created):** `personal-dev-hub-v1.3-owner-accepted`
 
 ---
 
@@ -45,7 +51,7 @@ Verification state is shown per backup. One corrupt file is reported `INVALID` a
 - At startup: selected backup is verified again → current app database is snapshotted (`RESTORE_SAFETY`) → restore is applied and validated before success.
 - Tracked Git repositories are unaffected.
 
-Owner evidence (disposable restart workflow, prior phase): manual backup captured state 2; live state advanced to 7; restart restored state 2; pre-restore safety snapshot preserved state 7; restore reported `SUCCEEDED`; a second restart did not re-execute.
+Owner evidence (disposable restart workflow; **not** performed on the owner's real database): manual backup captured state 2; live state advanced to 7; scheduled restore did not hot-swap; restart restored state 2; pre-restore safety snapshot preserved state 7; restore reported `SUCCEEDED`; a second restart did not re-execute.
 
 ### M4 — Source Health Center
 
@@ -55,6 +61,7 @@ Maintenance lists local copies needing attention: `PATH_MISSING`, `NOT_A_GIT_REP
 
 - **M5-A** — release hardening audit.
 - **M5-B1** — crash-safe restore attempt recovery: versioned restore-state journal; interrupted startups recover deterministically; fail-closed persistent startup blocking when application data safety cannot be proven (startup refuses to continue rather than initialize a fresh database).
+- **M5-B2** — V1.2 → V1.3 compatibility lock (zero schema/migration delta) and documentation alignment.
 
 ---
 
@@ -93,14 +100,14 @@ Normal rendering never spawns Git merely to show health.
 
 ---
 
-## QA evidence available so far
+## QA status
 
-### Schema compatibility (M5-B2)
+### Schema compatibility
 
 - Git read-only inspection: `schema.sql` and migrations `002`–`009` are **byte-identical** to `personal-dev-hub-v1.2-owner-accepted`. Zero new migration files.
 - Automated lock in `server/tests/v13-compatibility.test.ts` (names + content hashes).
 
-### V1.2 → V1.3 compatibility (M5-B2)
+### V1.2 → V1.3 compatibility
 
 Deterministic disposable fixture (never the owner database): full V1.2-final chain + representative Project / multi-binding / primary / health-cache / metadata / app-setting / activity data.
 
@@ -118,34 +125,59 @@ Opened through the real `openDatabase()` path:
 10. `PRAGMA foreign_key_check` → zero rows
 11. `PRAGMA integrity_check` → `ok`
 
-### Fresh database (M5-B2)
+### Fresh database
 
 Pristine DB through the real open path: file created, complete migration set applied once, core schema present, V1.2 binding shape present, FK/integrity clean.
 
-### Focused regressions (M5-B2)
+### Final owner live acceptance
 
-`restore-service`, `restore-api`, `db-backup`, `backup-service`, `backup-api`, `source-health`, `source-health-ui`, `maintenance-ui`, `migration-backup`, `migration-runner-fk` — **10 files / 81 tests PASS**.
+PASS (browser on the accepted application tree; **no live restore on the owner's real database**):
 
-### Full suite (M5-B2 actual run)
+- Dashboard
+- Projects
+- Project Detail
+- Activity
+- Contributions
+- Portfolio
+- Sources
+- Maintenance
+- Settings
+- Manual backup creation
+- Restore confirmation/cancel flow
+- Source Health
+- Rescan
+- Browser console sanity
 
-- **56 test files / 380 tests — all passed**
+Disposable restore evidence is preserved from the earlier restart workflow (see M3 highlights). A live restore was **not** performed against the owner's real database.
+
+### Merged-main verification
+
+Verified on main after merging `feature/v1.3` (no content difference between `feature/v1.3` and merged main):
+
+- **56 / 56 test files PASS**
+- **380 / 380 tests PASS**
 - typecheck PASS
 - production build PASS
-- `git diff --check` clean for whitespace errors on changed docs
-
-M3 happy-path manual restore QA is **not** re-run here; prior owner evidence and M5-B1 crash-state coverage remain authoritative.
+- `git diff --check` PASS
+- merged application commit: `fae98e44a611c76881b1b302d6105aeb2987be88`
+- accepted tree: `9d320205a050967c0b214f32d3001909040fe1e0`
 
 ---
 
-## Remaining release-finalization steps
+## Release finalization
 
-1. Final owner live acceptance (browser) on `feature/v1.3`
-2. Merge `feature/v1.3` → `main`
-3. Merged-main verification (typecheck, full suite, build, content parity with the feature branch)
-4. Create immutable acceptance tag — intended name `personal-dev-hub-v1.3-owner-accepted` (**planned; not yet created**)
-5. Docs-only commit on main recording the canonical accepted application commit / tree / tag (must not redefine the application checkpoint)
+All release-finalization items are complete:
 
-The final accepted V1.3 application commit/tree/tag are **not known yet** and are not invented in this document.
+- [x] Owner live acceptance PASS
+- [x] `feature/v1.3` merged to `main`
+- [x] Merged-main verification PASS
+- [x] Immutable acceptance tag `personal-dev-hub-v1.3-owner-accepted` created
+- [x] Canonical accepted application commit / tree / tag recorded
+- [x] Final docs-only release record (this document)
+
+No release-finalization item remains pending after this docs commit.
+
+This docs-only commit is **not** the accepted application checkpoint. The accepted application checkpoint remains commit `fae98e44a611c76881b1b302d6105aeb2987be88`, tree `9d320205a050967c0b214f32d3001909040fe1e0`, tag `personal-dev-hub-v1.3-owner-accepted`.
 
 ---
 
@@ -158,5 +190,6 @@ The final accepted V1.3 application commit/tree/tag are **not known yet** and ar
 | M3 — restart-mediated restore | `d7b5af3` |
 | M4 — Source Health Center | `32040d2` |
 | M5-B1 — crash-safe restore hardening | `ec338558` |
+| M5-B2 / release-candidate docs+compatibility checkpoint | `0191e570021d51ec6145df4d689d05d156eb1a9b` |
 
-The M5-B2 commit SHA is intentionally omitted from the commit that contains this document; it will appear in history after the owner commits.
+The docs-only commit that contains this final release record is intentionally omitted from the table above.
