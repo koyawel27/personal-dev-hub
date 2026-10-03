@@ -9,6 +9,7 @@ import { Badge } from "../components/Badge";
 import { EmptyState } from "../components/EmptyState";
 import { SourceHealthPanel } from "../components/SourceHealthPanel";
 import { formatBytes, formatDateTime, relativeTime } from "../format";
+import { waitForRestartRecovery } from "../lib/restartPolling";
 
 /**
  * V1.3 Maintenance: application backups + restart-mediated restore.
@@ -46,6 +47,7 @@ export function MaintenancePage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
   const reload = useCallback(async () => {
     const [list, restoreResult] = await Promise.all([
@@ -67,7 +69,7 @@ export function MaintenancePage() {
   }, [reload]);
 
   async function run(action: () => Promise<void>) {
-    if (busy) return;
+    if (busy || restarting) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -77,6 +79,60 @@ export function MaintenancePage() {
       setError(err instanceof ApiError ? err.message : "Request failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function restartApp(purpose: "restore" | "runtime") {
+    if (restarting || busy) return;
+    const confirmed = window.confirm(
+      purpose === "restore"
+        ? "Restart Personal Dev Hub now to apply the scheduled restore?\n\n" +
+            "The local app server will stop and start again. " +
+            "Tracked Git repositories are not changed."
+        : "Restart Personal Dev Hub?\n\n" +
+            "The local app server will stop and start again. " +
+            "Tracked Git repositories are not changed.",
+    );
+    if (!confirmed) return;
+
+    setRestarting(true);
+    setError(null);
+    setNotice(
+      purpose === "restore"
+        ? "Restarting Personal Dev Hub to apply the scheduled restore..."
+        : "Restarting Personal Dev Hub...",
+    );
+    try {
+      await client.restartApp();
+      // Must observe health DOWN, then healthy again — not a still-up server.
+      const outcome = await waitForRestartRecovery();
+      if (outcome === "recovered") {
+        window.location.reload();
+        return;
+      }
+      // Failure: clear BOTH restarting and the green restarting notice.
+      setRestarting(false);
+      setNotice(null);
+      if (outcome === "never-went-down") {
+        setError(
+          "Restart was accepted, but the server did not appear to stop. " +
+            "Nothing else was started. Try again only if needed, or use the " +
+            "Desktop Personal Dev Hub shortcut if the app is not running.",
+        );
+      } else {
+        setError(
+          "Personal Dev Hub did not become healthy again in time. " +
+            "Use the Desktop Personal Dev Hub shortcut if the app is not running.",
+        );
+      }
+    } catch (err: unknown) {
+      setRestarting(false);
+      setNotice(null);
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Restart could not be started. Use the Desktop Personal Dev Hub shortcut if needed.",
+      );
     }
   }
 
@@ -106,8 +162,8 @@ export function MaintenancePage() {
 
       {restore?.status === "PENDING" ? (
         <div className="notice restore-pending" role="status">
-          <strong>Restore scheduled.</strong> Restart Personal Dev Hub to apply
-          it.
+          <strong>Restore scheduled.</strong> A restart is required to apply
+          this backup.
           <div className="restore-detail">
             <span>
               Selected backup:{" "}
@@ -117,19 +173,29 @@ export function MaintenancePage() {
               Requested: {formatDateTime(restore.requestedAt)}
             </span>
           </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await client.clearRestoreState();
-                await reload();
-                setNotice("Scheduled restore cancelled.");
-              })
-            }
-          >
-            Cancel Scheduled Restore
-          </button>
+          <div className="backup-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || restarting}
+              onClick={() => void restartApp("restore")}
+            >
+              {restarting ? "Restarting..." : "Restart to Apply Restore"}
+            </button>
+            <button
+              type="button"
+              disabled={busy || restarting}
+              onClick={() =>
+                void run(async () => {
+                  await client.clearRestoreState();
+                  await reload();
+                  setNotice("Scheduled restore cancelled.");
+                })
+              }
+            >
+              Cancel Scheduled Restore
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -335,6 +401,32 @@ export function MaintenancePage() {
       </section>
 
       <SourceHealthPanel />
+
+      <section className="panel">
+        <div className="panel-head-row">
+          <h2>
+            <span className="h2-mark" aria-hidden="true" />
+            Runtime
+          </h2>
+        </div>
+        <p className="backup-scope-note">
+          Personal Dev Hub is running locally. Restart stops and starts the
+          local application server only — tracked Git repositories are
+          unaffected.
+        </p>
+        <button
+          type="button"
+          disabled={busy || restarting}
+          onClick={() => void restartApp("runtime")}
+        >
+          {restarting ? "Restarting..." : "Restart Personal Dev Hub"}
+        </button>
+        {restarting ? (
+          <p className="empty" role="status">
+            Restarting Personal Dev Hub...
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }

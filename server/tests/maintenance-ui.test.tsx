@@ -15,6 +15,7 @@ const deleteBackup = vi.fn();
 const restoreState = vi.fn();
 const scheduleRestore = vi.fn();
 const clearRestoreState = vi.fn();
+const restartApp = vi.fn();
 const confirmSpy = vi.fn();
 
 vi.mock("../../client/src/api.js", () => ({
@@ -34,7 +35,12 @@ vi.mock("../../client/src/api.js", () => ({
     restoreState: (...args: unknown[]) => restoreState(...args),
     scheduleRestore: (...args: unknown[]) => scheduleRestore(...args),
     clearRestoreState: (...args: unknown[]) => clearRestoreState(...args),
+    restartApp: (...args: unknown[]) => restartApp(...args),
   },
+}));
+
+vi.mock("../../client/src/lib/restartPolling.js", () => ({
+  waitForRestartRecovery: vi.fn(async () => "stayed-down" as const),
 }));
 
 import { MaintenancePage } from "../../client/src/pages/MaintenancePage.js";
@@ -88,6 +94,7 @@ beforeEach(() => {
   restoreState.mockReset();
   scheduleRestore.mockReset();
   clearRestoreState.mockReset();
+  restartApp.mockReset();
   confirmSpy.mockReset();
   confirmSpy.mockReturnValue(false);
   vi.stubGlobal("confirm", confirmSpy);
@@ -303,8 +310,11 @@ describe("Maintenance page (V1.3 M2/M3)", () => {
     ).toBeTruthy();
     const pendingBanner = document.querySelector(".restore-pending");
     expect(pendingBanner?.textContent ?? "").toMatch(
-      /Restore scheduled\.\s*Restart Personal Dev Hub to apply it\./i,
+      /Restore scheduled\.\s*A restart is required to apply this backup\./i,
     );
+    expect(
+      screen.getByRole("button", { name: /Restart to Apply Restore/i }),
+    ).toBeTruthy();
   });
 
   it("PENDING state shows restart copy and Cancel Scheduled Restore works", async () => {
@@ -333,7 +343,7 @@ describe("Maintenance page (V1.3 M2/M3)", () => {
       await screen.findByRole("button", { name: /Cancel Scheduled Restore/i }),
     ).toBeTruthy();
     const pendingBanner = document.querySelector(".restore-pending");
-    expect(pendingBanner?.textContent ?? "").toMatch(/Restart Personal Dev Hub/i);
+    expect(pendingBanner?.textContent ?? "").toMatch(/Restart to Apply Restore/i);
     await user.click(
       screen.getByRole("button", { name: /Cancel Scheduled Restore/i }),
     );
@@ -404,5 +414,50 @@ describe("Maintenance page (V1.3 M2/M3)", () => {
     const scope = document.querySelector(".backup-scope-note");
     expect(scope?.textContent ?? "").toMatch(/never changes tracked Git repositories|not.*tracked Git/i);
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("D: restart timeout clears Restarting notice and shows failure guidance", async () => {
+    mockInventory([sampleManual], {
+      status: "SUCCEEDED",
+      backupId: sampleManual.id,
+      requestedAt: "2026-03-04T05:06:07.890Z",
+      completedAt: "2026-03-04T05:07:00.000Z",
+      preRestoreBackupId: null,
+      message: null,
+    });
+    restartApp.mockResolvedValue({ ok: true, restarting: true });
+    confirmSpy.mockReturnValue(true);
+
+    // Force recovery poll to time out as stayed-down quickly via short path:
+    // client.restartApp succeeds but health never comes back — mock fetch.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <MaintenancePage />
+      </MemoryRouter>,
+    );
+
+    const runtimeBtn = await screen.findByRole("button", {
+      name: /Restart Personal Dev Hub/i,
+    });
+    await user.click(runtimeBtn);
+
+    // Failure banner; green restarting notice must be gone; button re-enabled.
+    expect(
+      await screen.findByText(/did not become healthy again in time/i),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Restarting Personal Dev Hub/i)).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: /Restart Personal Dev Hub/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(restartApp).toHaveBeenCalledTimes(1);
+
+    globalThis.fetch = originalFetch;
   });
 });

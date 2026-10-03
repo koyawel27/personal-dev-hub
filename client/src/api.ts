@@ -257,4 +257,9 @@ export const client = {
   // --- V1.3 M4 Maintenance source health (read-only attention list) ---
   sourceHealth: () =>
     api<SourceHealthResponse>("/api/maintenance/source-health"),
+  // --- Cooperative local restart (Windows launcher handoff) ---
+  restartApp: () =>
+    api<{ ok: true; restarting: true }>("/api/system/restart", {
+      method: "POST",
+    }),
 };

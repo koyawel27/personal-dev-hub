@@ -2,6 +2,10 @@ import { config } from "./config.js";
 import { getDb } from "./db/client.js";
 import { createApp } from "./app.js";
 import { processPendingRestore } from "./services/RestoreService.js";
+import {
+  registerGracefulShutdown,
+  requestGracefulShutdown,
+} from "./services/RuntimeShutdown.js";
 
 // Restart-mediated restore MUST complete before the singleton DB opens.
 processPendingRestore();
@@ -18,5 +22,6 @@ function shutdown(): void {
   server.close(() => process.exit(0));
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+registerGracefulShutdown(shutdown);
+process.on("SIGINT", () => requestGracefulShutdown());
+process.on("SIGTERM", () => requestGracefulShutdown());

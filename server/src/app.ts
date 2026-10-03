@@ -60,6 +60,7 @@ import {
   scheduleRestore,
 } from "./services/RestoreService.js";
 import { listSourceHealth } from "./services/SourceHealthService.js";
+import { restartCoordinator } from "./services/RestartService.js";
 
 function requireId(value: string | undefined, kind: "repository" | "source"): number {
   const id = parseNumericId(value);
@@ -352,6 +353,18 @@ export function createApp(): express.Express {
         if (!res.headersSent) {
           next(err);
         }
+      });
+  });
+
+  // Local-only cooperative restart. POST only; no request paths/commands.
+  app.post("/api/system/restart", (_req, res, next) => {
+    restartCoordinator
+      .requestRestart()
+      .then((result) => {
+        res.json(result);
+      })
+      .catch((err: unknown) => {
+        next(err);
       });
   });
 
